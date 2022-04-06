@@ -101,7 +101,7 @@ Now, let's create a new connector class, in [/src/Solutions](https://github.com/
 
 Finally, if you want to display the application's logo, add the image corresponding to your application with the png format and size 64*64 pixels in [assets/images/solution](https://github.com/Myddleware/myddleware/tree/main/assets/images/solution)
 
-> Tip: regarding error handling, there are several options. You should throw exceptions using a try/catch method. You should also log errors using Symfony logger. In case of errors, the error message will be sent to the ```background.log```, ```prod.log``` & ```dev.log`` files, depending on your environment.
+> Tip: regarding error handling, there are several options. You should throw exceptions using a try/catch method. You should also log errors using Symfony logger. In case of errors, the error message will be sent to the ```background.log```, ```prod.log``` & ```dev.log``` files, depending on your environment.
 
 Here is an example method from our [WordPress.php](https://github.com/Myddleware/myddleware/blob/main/src/Solutions/wordpress.php) file :
 
@@ -206,7 +206,7 @@ To debug this function, you can click on the button "Test" and check the result 
 
 *Let's now create the first rule*
 
-### Method get_modules
+### get_modules method
 
 Still in your connector class, we need to create a function that will display the list of modules in our connector. Create a "get_modules" function.
 
@@ -238,7 +238,7 @@ Now you can debug (with firebug for example) your function when the module list 
 
 Next step is the fields mapping, we now need to create a function for it.
 
-### Method get_module_fields
+### get_module_fields method
 
 You have to indicate to Myddleware what fields are available for each module. If your application has a function which describe all fields for every module, you should use it. For example, we did it for Salesforce or Prestashop. Otherwise you have to describe every field.
 
@@ -265,7 +265,7 @@ You should then add the fields related (field available to create relationship) 
 
 *Create a mapping and save the rule. We will now create the function read*
 
-### Method read
+### read method
 
 > The read function is one of the most important function in the connector.
 
@@ -301,7 +301,6 @@ Myddleware has to be able to read records from the source application. The list 
 
 > It is the reason why you have to create the attribute required_fields in your class :
 
-IMAGE
 
 The next step is to call the webservice function of your application depending on the input parameter :
 
@@ -317,9 +316,8 @@ values with an array of records. The key of these entries has to be the id of th
 
 The output of the function read should look like this:
 
-IMAGE
 
-### Method create
+### create method
 
 Create a rule now with your application in target. Then create the function public function create($param) in your class.
 
@@ -365,7 +363,7 @@ Reread a document:
 
         bin/console myddleware:massaction rerun document <document id> --env=background
 
-### Method update
+### update method
 
 The method update works in the same way as the method create. The output parameter must be built exactly like in the method create.
 
