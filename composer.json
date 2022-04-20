@@ -87,6 +87,7 @@
     "symfony/stopwatch": "5.4.*",
     "symfony/translation": "5.4.*",
     "symfony/twig-bundle": "5.4.*",
+    "symfony/ux-chartjs": "^2.1",
     "symfony/validator": "5.4.*",
     "symfony/web-profiler-bundle": "5.4.*",
     "symfony/webpack-encore-bundle": "^1.14",
