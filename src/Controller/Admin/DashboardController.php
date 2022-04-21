@@ -22,12 +22,13 @@ use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
 
 class DashboardController extends AbstractDashboardController
 {
-    #[Route('/admin', name: 'admin_dashboard')]
-    public function index(ChartBuilderInterface $chartBuilder= null): Response
-    {
-        assert(null !== $chartBuilder);
-        $chart = $chartBuilder->createChart(Chart::TYPE_LINE);
+    public function __construct(ChartBuilderInterface $chartBuilder){
+        $this->chartBuilder = $chartBuilder;
+    }
 
+    private function createChart(): Chart
+    {
+        $chart = $this->chartBuilder->createChart(Chart::TYPE_LINE);
         $chart->setData([
             'labels' => ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
             'datasets' => [
@@ -39,23 +40,53 @@ class DashboardController extends AbstractDashboardController
                 ],
             ],
         ]);
-        
         $chart->setOptions([
             'scales' => [
                 'y' => [
-                    'suggestedMin' => 0,
-                    'suggestedMax' => 100,
+                   'suggestedMin' => 0,
+                   'suggestedMax' => 100,
                 ],
             ],
         ]);
+        return $chart;
+    }
+
+    #[Route('/admin', name: 'admin_dashboard')]
+    public function index(): Response
+    {
+        //assert(null !== $chartBuilder);
+        // $chart = $chartBuilder->createChart(Chart::TYPE_LINE);
+
+        // $chart->setData([
+        //     'labels' => ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
+        //     'datasets' => [
+        //         [
+        //             'label' => 'My First dataset',
+        //             'backgroundColor' => 'rgb(255, 99, 132)',
+        //             'borderColor' => 'rgb(255, 99, 132)',
+        //             'data' => [0, 10, 5, 2, 20, 30, 45],
+        //         ],
+        //     ],
+        // ]);
+        
+        // $chart->setOptions([
+        //     'scales' => [
+        //         'y' => [
+        //             'suggestedMin' => 0,
+        //             'suggestedMax' => 100,
+        //         ],
+        //     ],
+        // ]);
 
         
         // Option 1. You can make your dashboard redirect to some common page of your backend
         // $routeBuilder = $this->container->get(AdminUrlGenerator::class);
         // $url = $routeBuilder->setController(ConnectorCrudController::class)->generateUrl();
         // return $this->redirect($url);
+   
         return $this->render('admin/my-dashboard.html.twig', [
-            'chart' => $chart,
+            //'chart' => $chart,
+            'chart' => $this->createChart(),
         ]);
     }
 
