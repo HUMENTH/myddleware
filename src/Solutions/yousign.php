@@ -25,18 +25,35 @@
 
 namespace App\Solutions;
 
-use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Exception;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
-use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 
+/**
+ * TODO: We need to find a way to use the events triggered via the YouSign WebHooks
+ * and possibly use those instead of datereference as a trigger to read files data (& then download the PDF files)?
+ * Or pass updatedAT property from the /files/{id} endpoint while actually targettting /files/{id}/download
+ */
 class yousigncore extends solution
 {
-    protected $limitCall = 100;
+    protected $callLimit = 20;
     // Enable to read deletion and to delete data
     protected $readDeletion = true;
     protected $sendDeletion = true;
+    /**
+     * All YouSign API calls go through the same URL, it is the API Key only which determines which API we're using
+     * and serves as auth credentials.
+     * Therefore, the user only needs to choose whether they want to use the prod or the staging environment.
+     * A possible enhancement could be to display a select button only (instead of a string input for now) in which
+     * the user simply chooses between the prod or the staging URL.
+     * This could be achieved by copying the bheaviour in Salesforce connector (with sandbox checkbox)
+     *
+     * @var string
+     */
+    protected $prodBaseUrl = 'https://api.yousign.com';
+    protected $stagingBaseUrl = 'https://staging-api.yousign.com';
 
-    protected $required_fields = ['default' => ['id', 'date_modified', 'date_entered']];
+    protected $required_fields = ['default' => ['id', 'updatedAt', 'createdAt']];
 
     public function getFieldsLogin()
     {
@@ -58,15 +75,22 @@ class yousigncore extends solution
     {
         parent::login($paramConnexion);
         try {
-            $result = $this->call($this->paramConnexion['url'], $this->paramConnexion['apikey']);
-            //dd($result);
+            if (empty($this->paramConnexion['url'])) {
+                $this->paramConnexion['url'] = $this->stagingBaseUrl;
+            }
+            $apiKey = $this->paramConnexion['apikey'];
+            // For now, in order to test we're correctly logged in to the API, we call a random endpoint since there's no 'login_check' endpoint
+            $endpoint = 'organizations';
+            $parameters['apikey'] = $apiKey;
+            $parameters['endpoint'] = $endpoint;
+            $result = $this->call($this->paramConnexion['url'], $parameters);
             if (!empty($result)) {
                 $this->connexion_valide = true;
             } elseif (empty($result)) {
                 throw new \Exception('Failed to connect but no error returned by YouSign. ');
             }
         } catch (\Exception $e) {
-            $error = $e->getMessage();
+            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
 
             return ['error' => $error];
@@ -75,132 +99,154 @@ class yousigncore extends solution
 
     public function get_modules($type = 'source')
     {
-        if ('source' == $type) {
-            return [
-            'users' => 'Users',
-            'files' => 'Files',
-            'procedures' => 'Procedures',
-            'members' => 'Members',
-            ];
-        }
-
         return [
             'users' => 'Users',
             'files' => 'Files',
+            'download_files' => 'Download Files',
             'procedures' => 'Procedures',
             'members' => 'Members',
         ];
     }
 
-    //Returns the fields of the module passed in parameter
     public function get_module_fields($module, $type = 'source', $param = null)
     {
         parent::get_module_fields($module, $type);
         try {
-        //Use yousign metadata !just for user and procedure! to review
+            //Use yousign metadata !just for user and procedure! to review
             require 'lib/yousign/metadata.php';
-            switch ($module) {
-            case 'users':
-                if (!empty($moduleFields['users'])) {
-                    $this->moduleFields = $moduleFields['users'];
+            if (!empty($moduleFields[$module])) {
+                $this->moduleFields = array_merge($this->moduleFields, $moduleFields[$module]);
+            }
 
-                    return $this->moduleFields;
-                }
-                break;
-            case 'procedures':
-                if (!empty($moduleFields['procedures'])) {
-                    $this->moduleFields = $moduleFields['procedures'];
+            if (!empty($fieldsRelate[$module])) {
+                $this->fieldsRelate = $fieldsRelate[$module];
+            }
 
-                    return $this->moduleFields;
-                }
-                break;
-        }
+            if (!empty($this->fieldsRelate)) {
+                $this->moduleFields = array_merge($this->moduleFields, $this->fieldsRelate);
+            }
+
+            return $this->moduleFields;
         } catch (\Exception $e) {
-            $error = $e->getMessage();
-
+            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
+            $this->logger->error($error);
             return false;
         }
     }
 
-    // Read all fields
     public function read($param)
     {
         try {
-            //'https://staging-api.yousign.com/procedures'; <- url ok with postman
-
-            $content = [];
+            $result = [];
             $module = $param['module'];
-
-            if (!empty($param)) {
-                $params = $this->call($this->paramConnexion['url'], $this->paramConnexion['token']);
-            }
-
-            // Remove Myddleware's system fields (useful?)
             $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
-            // Add required fields
             $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
-
-            // $client = HttpClient::create();
+            if (empty($param['limit'])) {
+                $param['limit'] = $this->callLimit;
+            } else {
+                if ($param['limit'] < $this->callLimit) {
+                    $this->callLimit = $param['limit'];
+                }
+            }
+            $stop = false;
+            $count = 0;
+            $page = 1;
+            $content = [];
+            $endpoint = $module;
+            if ($module === 'download_files'){
+                $module = 'files';
+                $endpoint = $module.'/{id}/download';
+            } 
+            $this->paramConnexion['endpoint'] = $endpoint;
+            try {
+                $response = $this->call($this->paramConnexion['url'], $this->paramConnexion);
+                $response = json_decode($response);
+                if (!empty($response)){
+                    $result['values'] = [];
+                    $currentCount = 0;
+                    foreach($response as $record){
+                        ++$currentCount;
+                        foreach ($param['fields'] as $field) {
+                            // dd($param);
+                            // $result['values'][$record->id]['date_modified'] = date('Y-m-d H:i:s');
+                            $result['values'][$record->$field] = (!empty($record->$field) ? $record->$field : '');
+                            $result['date_modified'] = (!empty($record->$field) ? $record->$field : '');
+                        }
+                        $result['values'][$record['id']]['id'] = $record['id'];
+                        ++$result['count'];
+                        ++$count;
+                    }
+                }
+            } catch(Exception $e){
+                $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
+                $result['error'] = $error;
+                $this->logger->error($error);
+            }
         } catch (\Exception $e) {
-            $error = $e->getMessage();
-
+            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
+            $result['error'] = $error;
+            $this->logger->error($error);
             return false;
         }
     }
 
-    public function logout()
-    {
-        try {
-            $logout_parameters = ['session' => $this->session];
-            $this->call('logout', $logout_parameters, $this->paramConnexion['url']);
-
-            return true;
-        } catch (\Exception $e) {
-            $this->logger->error('Error logout REST '.$e->getMessage());
-
-            return false;
-        }
-    }
-
-    //function to make cURL request
     protected function call($url, $parameters)
     {
         try {
+            $endpoint = "";
+            $url = $this->stagingBaseUrl;
+            $apiKey = "";
+            if (!empty($parameters['url'])) {
+                $url = $parameters['url'];
+            }
+            if (!empty($parameters['endpoint'])) {
+                $endpoint = $parameters['endpoint'];
+            }
+            if (!empty($parameters['apikey'])) {
+                $apiKey = $parameters['apikey'];
+            }
+
             $curl = curl_init();
             curl_setopt_array($curl, [
-            CURLOPT_URL => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => '',
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 0,
-            CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => 'GET',
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer '.$parameters,
-                'Content-Type: application/json',
-            ],
-        ]);
+                CURLOPT_URL => $url.'/'.$endpoint,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_ENCODING => '',
+                CURLOPT_MAXREDIRS => 10,
+                CURLOPT_TIMEOUT => 0,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                CURLOPT_CUSTOMREQUEST => 'GET',
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer '.$apiKey,
+                    'Content-Type: application/json',
+                ],
+            ]);
             $response = curl_exec($curl);
             $err = curl_error($curl);
             curl_close($curl);
             if ($err) {
-                return 'cURL Error #:'.$err;
-            } else {
-                return $response;
+                $this->logger->error($err);
+                throw new \Exception('cURL Error #: '.$err);
             }
+            return $response;
         } catch (\Exception $e) {
+            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
+            $this->logger->error($error);
             return false;
         }
     }
 
-    //convert from Myddleware format to Woocommerce format
-    protected function dateTimeFromMyddleware($dateTime)
-    {
-        $dto = new \DateTime($dateTime);
-        // Return date to UTC timezone
-        return $dto->format('Y-m-d\TH:i:s');
-    }
+    	// Renvoie le nom du champ de la date de référence en fonction du module et du mode de la règle
+	public function getRefFieldName($moduleSource, $ruleMode) {
+		if(in_array($ruleMode,array("0","S"))) {
+			return "updatedAt";
+		} else if ($ruleMode == "C"){
+			return "createdAt";
+		} else {
+			throw new \Exception ("$ruleMode is not a correct Rule mode.");
+		}
+		return null;
+	}
 }
 
 class yousign extends yousigncore
