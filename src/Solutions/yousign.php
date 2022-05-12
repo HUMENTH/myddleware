@@ -25,9 +25,9 @@
 
 namespace App\Solutions;
 
-use Symfony\Component\HttpClient\HttpClient;
-use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\HttpClient\HttpClient;
 
 class yousigncore extends solution
 {
@@ -42,24 +42,14 @@ class yousigncore extends solution
     {
         return [
             [
-                'name' => 'login',
-                'type' => TextType::class,
-                'label' => 'solution.fields.login',
-            ],
-            [
-                'name' => 'password',
-                'type' => PasswordType::class,
-                'label' => 'solution.fields.password',
-            ],
-            [
                 'name' => 'url',
                 'type' => TextType::class,
                 'label' => 'solution.fields.url',
             ],
             [
-                'name' => 'token',
+                'name' => 'apikey',
                 'type' => PasswordType::class,
-                'label' => 'solution.fields.token',
+                'label' => 'solution.fields.apikey',
             ],
         ];
     }
@@ -68,37 +58,37 @@ class yousigncore extends solution
     {
         parent::login($paramConnexion);
         try {
-            $result = $this->call($this->paramConnexion['url'], $this->paramConnexion['token']);
+            $result = $this->call($this->paramConnexion['url'], $this->paramConnexion['apikey']);
             //dd($result);
             if (!empty($result)) {
                 $this->connexion_valide = true;
             } elseif (empty($result)) {
                 throw new \Exception('Failed to connect but no error returned by YouSign. ');
             }
-            
         } catch (\Exception $e) {
             $error = $e->getMessage();
             $this->logger->error($error);
+
             return ['error' => $error];
         }
     }
 
-     //Get module list
-     public function get_modules($type = 'source')
+    public function get_modules($type = 'source')
     {
         if ('source' == $type) {
             return [
-               'users' => 'Users',
-               'files' => 'Files',
-               'procedures' => 'Procedures',
-               'members' => 'Members'
+            'users' => 'Users',
+            'files' => 'Files',
+            'procedures' => 'Procedures',
+            'members' => 'Members',
             ];
         }
+
         return [
             'users' => 'Users',
             'files' => 'Files',
             'procedures' => 'Procedures',
-            'members' => 'Members'
+            'members' => 'Members',
         ];
     }
 
@@ -107,26 +97,27 @@ class yousigncore extends solution
     {
         parent::get_module_fields($module, $type);
         try {
-
         //Use yousign metadata !just for user and procedure! to review
-        require 'lib/yousign/metadata.php';
-        switch ($module) {
+            require 'lib/yousign/metadata.php';
+            switch ($module) {
             case 'users':
                 if (!empty($moduleFields['users'])) {
-                    $this->moduleFields = $moduleFields['users'];        
-                   return $this->moduleFields;
-                 }
+                    $this->moduleFields = $moduleFields['users'];
+
+                    return $this->moduleFields;
+                }
                 break;
             case 'procedures':
                 if (!empty($moduleFields['procedures'])) {
-                    $this->moduleFields = $moduleFields['procedures'];        
+                    $this->moduleFields = $moduleFields['procedures'];
+
                     return $this->moduleFields;
-                    }
+                }
                 break;
-             
         }
         } catch (\Exception $e) {
             $error = $e->getMessage();
+
             return false;
         }
     }
@@ -135,29 +126,24 @@ class yousigncore extends solution
     public function read($param)
     {
         try {
-
-            //'https://staging-api.yousign.com/procedures'; <- url ok with postman 
+            //'https://staging-api.yousign.com/procedures'; <- url ok with postman
 
             $content = [];
             $module = $param['module'];
 
             if (!empty($param)) {
                 $params = $this->call($this->paramConnexion['url'], $this->paramConnexion['token']);
-            }        
-            
+            }
+
             // Remove Myddleware's system fields (useful?)
             $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
-             // Add required fields
-             $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
+            // Add required fields
+            $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
 
-
-            
             // $client = HttpClient::create();
-        
-
-            
         } catch (\Exception $e) {
             $error = $e->getMessage();
+
             return false;
         }
     }
@@ -174,41 +160,41 @@ class yousigncore extends solution
 
             return false;
         }
-    } 
-    
-     //function to make cURL request
-     protected function call($url, $parameters)
-     {
+    }
+
+    //function to make cURL request
+    protected function call($url, $parameters)
+    {
         try {
-        $curl = curl_init();  
-        curl_setopt_array($curl, array(
+            $curl = curl_init();
+            curl_setopt_array($curl, [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_ENCODING => "",
+            CURLOPT_ENCODING => '',
             CURLOPT_MAXREDIRS => 10,
             CURLOPT_TIMEOUT => 0,
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-            CURLOPT_CUSTOMREQUEST => "GET",
-            CURLOPT_HTTPHEADER => array(
-                "Authorization: Bearer ".$parameters,
-                "Content-Type: application/json"
-            ),
-        ));
-        $response = curl_exec($curl);
-        $err = curl_error($curl);
-        curl_close($curl);
-        if ($err) {
-            return "cURL Error #:" . $err;
-        } else {
-            return $response;
-        }       
+            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer '.$parameters,
+                'Content-Type: application/json',
+            ],
+        ]);
+            $response = curl_exec($curl);
+            $err = curl_error($curl);
+            curl_close($curl);
+            if ($err) {
+                return 'cURL Error #:'.$err;
+            } else {
+                return $response;
+            }
         } catch (\Exception $e) {
             return false;
         }
-     }
+    }
 
-      //convert from Myddleware format to Woocommerce format
+    //convert from Myddleware format to Woocommerce format
     protected function dateTimeFromMyddleware($dateTime)
     {
         $dto = new \DateTime($dateTime);
