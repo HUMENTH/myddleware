@@ -72,7 +72,6 @@ class sugarcrmcore extends solution
         ];
     }
 
-    // Connect to SugarCRM
     public function login($paramConnexion)
     {
         parent::login($paramConnexion);
@@ -103,7 +102,6 @@ class sugarcrmcore extends solution
         }
     }
 
-    // Get module list
     public function get_modules($type = 'source')
     {
         try {
@@ -266,16 +264,11 @@ class sugarcrmcore extends solution
         }
     }
 
-    // get_module_fields($module)
-
     /**
-     * Function read data.
-     *
      * @param $param
      *
      * @return mixed
      */
-    // public function readData($param)
     public function read($param)
     {
         $result = [];
@@ -372,8 +365,6 @@ class sugarcrmcore extends solution
         return 'date_modified';
     }
 
-    // end function read
-
     /**
      * Function create data.
      *
@@ -404,8 +395,6 @@ class sugarcrmcore extends solution
 
         return $result;
     }
-
-    // end function create
 
     /**
      * Function update data.
@@ -438,8 +427,6 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function update
-
     /**
      * Function delete data.
      *
@@ -470,8 +457,6 @@ class sugarcrmcore extends solution
 
         return $result;
     }
-
-    // end function update
 
     public function upsert($method, $param)
     {
@@ -578,8 +563,6 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function create
-
     // Convert date to Myddleware format
     // 2020-07-08T12:33:06+02:00 to 2020-07-08 10:33:06
     protected function dateTimeToMyddleware($dateTime)
@@ -591,8 +574,6 @@ class sugarcrmcore extends solution
         return $dto->format('Y-m-d H:i:s');
     }
 
-    // dateTimeToMyddleware($dateTime)
-
     // Convert date to SugarCRM format
     protected function dateTimeFromMyddleware($dateTime)
     {
@@ -600,8 +581,6 @@ class sugarcrmcore extends solution
         // Return date to UTC timezone
         return $dto->format('Y-m-d\TH:i:s+00:00');
     }
-
-    // dateTimeToMyddleware($dateTime)
 
     // Build the direct link to the record (used in data transfer view)
     public function getDirectLink($rule, $document, $type)

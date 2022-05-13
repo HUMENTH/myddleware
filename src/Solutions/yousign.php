@@ -26,13 +26,13 @@
 namespace App\Solutions;
 
 use Exception;
-use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 
 /**
  * TODO: We need to find a way to use the events triggered via the YouSign WebHooks
  * and possibly use those instead of datereference as a trigger to read files data (& then download the PDF files)?
- * Or pass updatedAT property from the /files/{id} endpoint while actually targettting /files/{id}/download
+ * Or pass updatedAT property from the /files/{id} endpoint while actually targettting /files/{id}/download.
  */
 class yousigncore extends solution
 {
@@ -46,7 +46,7 @@ class yousigncore extends solution
      * Therefore, the user only needs to choose whether they want to use the prod or the staging environment.
      * A possible enhancement could be to display a select button only (instead of a string input for now) in which
      * the user simply chooses between the prod or the staging URL.
-     * This could be achieved by copying the bheaviour in Salesforce connector (with sandbox checkbox)
+     * This could be achieved by copying the bheaviour in Salesforce connector (with sandbox checkbox).
      *
      * @var string
      */
@@ -130,6 +130,7 @@ class yousigncore extends solution
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
+
             return false;
         }
     }
@@ -153,18 +154,18 @@ class yousigncore extends solution
             $page = 1;
             $content = [];
             $endpoint = $module;
-            if ($module === 'download_files'){
+            if ('download_files' === $module) {
                 $module = 'files';
                 $endpoint = $module.'/{id}/download';
-            } 
+            }
             $this->paramConnexion['endpoint'] = $endpoint;
             try {
                 $response = $this->call($this->paramConnexion['url'], $this->paramConnexion);
                 $response = json_decode($response);
-                if (!empty($response)){
+                if (!empty($response)) {
                     $result['values'] = [];
                     $currentCount = 0;
-                    foreach($response as $record){
+                    foreach ($response as $record) {
                         ++$currentCount;
                         foreach ($param['fields'] as $field) {
                             // dd($param);
@@ -177,7 +178,7 @@ class yousigncore extends solution
                         ++$count;
                     }
                 }
-            } catch(Exception $e){
+            } catch (Exception $e) {
                 $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
                 $result['error'] = $error;
                 $this->logger->error($error);
@@ -186,6 +187,7 @@ class yousigncore extends solution
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $result['error'] = $error;
             $this->logger->error($error);
+
             return false;
         }
     }
@@ -193,9 +195,9 @@ class yousigncore extends solution
     protected function call($url, $parameters)
     {
         try {
-            $endpoint = "";
+            $endpoint = '';
             $url = $this->stagingBaseUrl;
-            $apiKey = "";
+            $apiKey = '';
             if (!empty($parameters['url'])) {
                 $url = $parameters['url'];
             }
@@ -228,25 +230,29 @@ class yousigncore extends solution
                 $this->logger->error($err);
                 throw new \Exception('cURL Error #: '.$err);
             }
+
             return $response;
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
+
             return false;
         }
     }
 
-    	// Renvoie le nom du champ de la date de référence en fonction du module et du mode de la règle
-	public function getRefFieldName($moduleSource, $ruleMode) {
-		if(in_array($ruleMode,array("0","S"))) {
-			return "updatedAt";
-		} else if ($ruleMode == "C"){
-			return "createdAt";
-		} else {
-			throw new \Exception ("$ruleMode is not a correct Rule mode.");
-		}
-		return null;
-	}
+    // Renvoie le nom du champ de la date de référence en fonction du module et du mode de la règle
+    public function getRefFieldName($moduleSource, $ruleMode)
+    {
+        if (in_array($ruleMode, ['0', 'S'])) {
+            return 'updatedAt';
+        } elseif ('C' == $ruleMode) {
+            return 'createdAt';
+        } else {
+            throw new \Exception("$ruleMode is not a correct Rule mode.");
+        }
+
+        return null;
+    }
 }
 
 class yousign extends yousigncore
