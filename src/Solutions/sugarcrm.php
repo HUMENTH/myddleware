@@ -284,7 +284,7 @@ class sugarcrmcore extends solution
         $filterArgs = [
             'max_num' => $param['limit'],
             'offset' => 0,
-            'fields' => implode($param['fields'], ','),
+            'fields' => implode(',', $param['fields']),
             'order_by' => 'date_modified',
             'deleted' => $deleted,
         ];
@@ -366,8 +366,6 @@ class sugarcrmcore extends solution
     }
 
     /**
-     * Function create data.
-     *
      * @param $param
      *
      * @return mixed
@@ -397,8 +395,6 @@ class sugarcrmcore extends solution
     }
 
     /**
-     * Function update data.
-     *
      * @param $param
      *
      * @return mixed
@@ -428,8 +424,6 @@ class sugarcrmcore extends solution
     }
 
     /**
-     * Function delete data.
-     *
      * @param $param
      *
      * @return mixed
@@ -623,12 +617,9 @@ class sugarcrmcore extends solution
                 $json_arguments = json_encode($parameters);
                 curl_setopt($request, CURLOPT_POSTFIELDS, $json_arguments);
             }
-
-            //execute request
             $response = curl_exec($request);
-            //decode response
             $response_obj = json_decode($response);
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             throw new \Exception($e->getMessage());
         }
         // Send exception catched into functions
