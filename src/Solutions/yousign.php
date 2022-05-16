@@ -45,7 +45,7 @@ use Symfony\Component\Form\Extension\Core\Type\TextType;
  */
 class yousigncore extends solution
 {
-    protected $callLimit = 20;
+    protected $callLimit = 10;
     // Enable to read deletion and to delete data
     protected $readDeletion = true;
     protected $sendDeletion = true;
@@ -60,7 +60,28 @@ class yousigncore extends solution
     protected $stagingBaseUrl = 'https://staging-api.yousign.com';
 
     protected $required_fields = ['default' => ['id', 'updatedAt', 'createdAt']];
+	
+	protected $parentModules = array(
+									'file_objects' => array(
+											// Member module is parenty of file_objects module
+											'parentModule' => 'members', 
+											// In member module, fileObjects is the key that contains file_objects records
+											'key' => 'fileObjects',
+											// Additional fields to be returned as relate fields 
+											'fieldsLevel1' => array('procedure' => 'id'),
+											'fieldsLevel2' => array('member' => 'id', 'user' => 'user'),
+									),
+									'members' => array(
+											'parentModule' => 'procedures',
+											'key' => 'members',
+											'fieldsLevel1' => array('procedure' => 'id'),
+									)
+								);		
 
+	// protected $parentModules = array(
+									// 'members' => array('parentModule' => 'procedures', 'key' => 'members'),
+									// 'file_objects' => array('parentModule' => 'members', 'key' => 'fileObjects')
+								// );
     /**
      * Fields displayed on UI for user to fill in in order to be able to log in to the YouSign API.
      * The Sandbox field only accepts '0' and '1' and acts as a boolean to determine which base URL to use.
@@ -98,17 +119,17 @@ class yousigncore extends solution
     {
         parent::login($paramConnexion);
         try {
-            if ('1' === $this->paramConnexion['sandbox']) {
-                $this->paramConnexion['url'] = $this->stagingBaseUrl;
-            } else {
-                $this->paramConnexion['url'] = $this->prodBaseUrl;
-            }
+            // if ('1' === $this->paramConnexion['sandbox']) {
+                // $this->paramConnexion['url'] = $this->stagingBaseUrl;
+            // } else {
+                // $this->paramConnexion['url'] = $this->prodBaseUrl;
+            // }
 
-            $apiKey = $this->paramConnexion['apikey'];
-            $endpoint = 'organizations';
-            $parameters['apikey'] = $apiKey;
-            $parameters['endpoint'] = $endpoint;
-            $result = $this->call($this->paramConnexion['url'], $parameters);
+            // $apiKey = $this->paramConnexion['apikey'];
+            // $endpoint = 'organizations';
+            // $parameters['apikey'] = $apiKey;
+            // $parameters['endpoint'] = $endpoint;
+            $result = $this->youSignCall('organizations');
             if (!empty($result)) {
                 $this->connexion_valide = true;
             } else {
@@ -131,6 +152,7 @@ class yousigncore extends solution
     {
         return [
             'users' => 'Users',
+            'file_objects' => 'File objects',
             'files' => 'Files',
             'download_files' => 'Download Files',
             'procedures' => 'Procedures',
@@ -183,81 +205,85 @@ class yousigncore extends solution
      */
     public function read($param)
     {
-        try {
-            $module = $param['module'];
-            $endpoint = $module;
-            if ('download_files' === $module) {
-                $module = 'files';
-                // TODO: find a way to pass the file ID as a GET parameter to our request in order to download the base64 document
-                $endpoint = $module.'/{id}/download';
-            }
-            $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
-            $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
-            if (empty($param['limit'])) {
-                $param['limit'] = $this->callLimit;
-            } else {
-                if ($param['limit'] < $this->callLimit) {
-                    $this->callLimit = $param['limit'];
-                }
-            }
-            $dateRef = $this->removeTimeFromDateRef($param['date_ref']);
-            $queryStringParams['date_ref'] = $dateRef;
-            $moduleSpecificQueryString = $this->determineQueryStringBasedOnModule($module, $queryStringParams);
-            $queryString = $this->cleanUpQueryStringFilter($moduleSpecificQueryString);
-            $this->paramConnexion['endpoint'] = $endpoint.$queryString;
-            $response = $this->call($this->paramConnexion['url'], $this->paramConnexion);
-            $response = json_decode($response);
-            if (!empty($response) && is_array($response)) {
-                $result = $this->transformResponseToMyddlewareResultsFormat($response, $param);
-            } elseif ($response instanceof stdClass) {
-                $result['error'] = $response->error;
-                $this->logger->error($response->error);
-            } else {
-                $result = [];
-            }
-        } catch (\Exception $e) {
-            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
-            $result['error'] = $error;
-            $this->logger->error($error);
-
-            return false;
-        }
+// print_r($param);
+        // try {
+		
+		// We don't use limit because we can't sort data by updated date. We could miss records if we use limit.
+		$nbPage = 1;
+		$result = array();
+		// Get the module used for API call (check sub module level 1, e.g memebers->procedures)
+// echo '$module : '.$param['module'].chr(10);
+		$moduleApi = (!empty($this->parentModules[$param['module']]['parentModule']) ? $this->parentModules[$param['module']]['parentModule'] : $param['module']);
+// echo '$moduleApi : '.$moduleApi.chr(10);
+		// Get the module used for API call (check sub module level 2, e.g file_objects->memebers->procedures)
+		$moduleApi = (!empty($this->parentModules[$moduleApi]) ? $this->parentModules[$moduleApi]['parentModule'] : $moduleApi);
+// echo '$moduleApi : '.$moduleApi.chr(10);
+// return null;
+		// $endpoint = $module;
+		/* if ('download_files' === $module) {
+			$moduleApi = 'files';
+			// TODO: find a way to pass the file ID as a GET parameter to our request in order to download the base64 document
+			$endpoint = $moduleApi.'/{id}/download';
+		} */
+		// $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
+		// $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
+		
+		
+		/* if (empty($param['limit'])) {
+			$param['limit'] = $this->callLimit;
+		} else {
+			if ($param['limit'] < $this->callLimit) {
+				$this->callLimit = $param['limit'];
+			}
+		} */
+		// Yousign use only date as filter, not datetime
+		$dateRef = $this->removeTimeFromDateRef($param['date_ref']);
+		// We read all data from the day (not hour) of the refrerence date and we keep only the ones with an updatedDate (datetime type) > dateRef (with time)
+		do {
+			$response = array();
+			// In case an id is specified
+			if (!empty($param['query']['id'])) {
+				$endpoint = $moduleApi.'/'.$param['query']['id'];
+			// Read action using reference date	
+			} else {
+				$endpoint = $moduleApi.'?itemsPerPage='.$this->callLimit.'&pagination=true&page='.$nbPage.'&updatedAt[after]='.$dateRef;	
+			}
+			// Call YouSign API
+			$responseYouSign = $this->youSignCall($endpoint);
+			// Format response
+			if (!empty($responseYouSign)) {
+				$responseYouSign = json_decode($responseYouSign);
+				// Add a dimension to the array if the call is executed with an id. By this way we will get the same format result than the call by reference date
+				if (empty($param['query']['id'])) {
+					$response = $responseYouSign;
+				} else {	
+					$response[] = $responseYouSign;
+				}
+			}
+			// Error management
+			if (!empty($response->title)) {
+				throw new \Exception('Failed to read '.$moduleApi.' : '.$response->title.' - '.$response->detail.' ('.$response->type.')');
+			}
+			// Format and filter result
+			$resultCall = $this->transformResponseToMyddlewareResultsFormat($response, $param);
+			// Merge the result call for the current page into the global result
+			if (!empty($resultCall)) {
+				$result = array_merge($result,$resultCall);
+			}
+			// Read the next page
+			$nbPage++;			
+		// Stop if there is no more record to read
+		// or if we read a specific record
+		} while (
+				!empty($response)
+			AND count($response) >= $this->callLimit
+			AND empty($param['query']['id'])
+		);
 
         return $result;
     }
 
-    /**
-     * Determines which query string to add to the GET request to the YouSign API
-     * depending on the module (not all modules are born equal).
-     *
-     * @param string $module
-     * @param array|null $queryStringParams
-     * @return string
-     */
-    public function determineQueryStringBasedOnModule(string $module, ?array $queryStringParams) :string
-    {
-        $dateRef = $queryStringParams['date_ref'];
-        switch ($module) {
-            case 'users':
-                $queryString = "";
-                break;
-
-            case 'files':
-                $id= $queryStringParams['file_id'];
-                $queryString = "?id=$id";
-                break;
-
-            case 'procedures':
-                $queryString = "?updatedAt[strictly_after]=$dateRef";
-                break;
-            
-            default:
-            $queryString = "";
-                break;
-        }  
-        return $queryString;
-        
-    }
+    
     
 
     /**
@@ -266,16 +292,116 @@ class yousigncore extends solution
     public function transformResponseToMyddlewareResultsFormat(array $response, array $param): array
     {
         $result = [];
+		// Manage result for each records returned by YouSign
         foreach ($response as $record) {
-            foreach ($param['fields'] as $field) {
-                $result[$record->id][$field] = (!empty($record->$field) ? $record->$field : '');
-            }
-            $result[$record->id]['id'] = $record->id;
+			// Current module (e.g file_objects)
+			$module = $param['module'];
+		
+			// Browse the module to check if it is a main module (procedure) , a sub module (members) or a sub sub module (file_objects) 
+			// Example level 1 members		: members->procedures
+			// Example level 2 file_objects : file_objects->members->procedures
+			if (!empty($this->parentModules[$module]['parentModule'])) {
+				// Get parent module data 
+				// Example level 1 (file_objects) : $parentModule = members ; $moduleKey = fileObjects 
+				$moduleKey = $this->parentModules[$module]['key'];
+				$parentModule = $this->parentModules[$module]['parentModule'];
+				
+				// Check if the module called is a parent module level 2 
+				if (!empty($this->parentModules[$parentModule]['parentModule'])) {
+					// Get parent parent module data 
+					// Example level 2 (members) : $parentModuleKey = members
+					$parentModuleKey = $this->parentModules[$parentModule]['key'];
+					
+					// Read all sub records level 1 to get sub records level 2
+					if (!empty($record->$parentModuleKey)) {
+						$subSubRecords = array();
+						// Each sub records level 1 can contains several sub records (level 2)
+						foreach($record->$parentModuleKey as $subrecords) {
+							// If sub records (level 2) exist, we add them to the result
+							if (!empty($subrecords->$moduleKey)) {
+								foreach ($subrecords->$moduleKey as $subLevel2Records) {
+									// Get additional fields from parent module level 1 
+									if (!empty($this->parentModules[$module]['fieldsLevel1'])) {
+										foreach ($this->parentModules[$module]['fieldsLevel1'] as $keyFieldLevel1 => $valueFieldLevel1) {
+											$subLevel2Records->$keyFieldLevel1 = $this->cleanId($record->$valueFieldLevel1);
+										}
+									}
+									// Get additional fields from parent module level 2 
+									if (!empty($this->parentModules[$module]['fieldsLevel2'])) {
+										foreach ($this->parentModules[$module]['fieldsLevel2'] as $keyFieldLevel2 => $valueFieldLevel2) {
+											$subLevel2Records->$keyFieldLevel2 = $this->cleanId($subrecords->$valueFieldLevel2);
+										}
+									}
+									$subSubRecords[] = $subLevel2Records;
+								}
+							}
+						}
+					}
+				// Only 1 sub level	
+				} else {
+					// Each record can contains several sub records (level 1)
+					if (!empty($record->$module)) {
+						foreach ($record->$module as $subLevel1Records) {
+							// Get additional fields from parent module level 1 
+							if (!empty($this->parentModules[$module]['fieldsLevel1'])) {
+								foreach ($this->parentModules[$module]['fieldsLevel1'] as $keyFieldLevel1 => $valueFieldLevel1) {
+									$subLevel1Records->$keyFieldLevel1 = $this->cleanId($record->$valueFieldLevel1);
+								}
+							}
+							$subSubRecords[] = $subLevel1Records;
+						}
+					}
+				}
+			// No sub level
+			} else {
+				$subSubRecords[] = $record;	
+			}
+		
+			// $subSubRecords contains all records into an array without sub level. 
+			if (!empty($subSubRecords)) {
+				// We check each records
+				foreach ($subSubRecords as $subSubRecord) {	
+					// Remove /moduleName/ from the id because / at begining of the id is incompatible with myddleware (readrecord command)
+					$recordId = $this->cleanId($subSubRecord->id);
+					
+					// If record update date < date ref, we skip the record because it has already been read					
+					$updatedAt = $this->dateTimeToMyddleware($subSubRecord->updatedAt);				
+					if ($updatedAt <= $param['date_ref']) {						
+						continue;
+					}
+					// Save the record 
+					foreach ($param['fields'] as $field) {
+						$fieldStructure = explode('__', $field);
+						// Direct field
+						if (empty($fieldStructure[1])) {
+							$result[$recordId][$field] = (!empty($subSubRecord->$field) ? $subSubRecord->$field : '');
+						// Field in a sub structure
+						} else {
+							$structureKey = $fieldStructure[0];
+							$structureFieldName = $fieldStructure[1];
+							$result[$recordId][$field] = (!empty($subSubRecord->$structureKey->$structureFieldName) ? $subSubRecord->$structureKey->$structureFieldName : '');
+						}
+					}
+					$result[$recordId]['id'] = $recordId;
+				}
+			}
         }
-
+		// Return result with only the fields requested and records with updatedDate > date_ref
         return $result;
     }
 
+	// Format id are like /<module>/id, this function returns only the id
+	protected function cleanId($id){
+		if (!empty($id)) {
+			// Transform id into an arry and return the last value
+			$arrayId = explode('/', $id);
+			if (!empty($arrayId[2])) {
+				return $arrayId[2];
+			}
+		}
+		return $id;
+	}
+	
     /**
      * GET cURL call to YouSign API endpoints (modules).
      *
@@ -284,22 +410,11 @@ class yousigncore extends solution
      *
      * @return string|bool
      */
-    protected function call($url, $parameters)
+    protected function youSignCall($endpoint)
     {
         try {
-            $url = $this->stagingBaseUrl;
-            $endpoint = '';
-            $apiKey = '';
-            if (!empty($parameters['url'])) {
-                $url = $parameters['url'];
-            }
-            if (!empty($parameters['endpoint'])) {
-                $endpoint = $parameters['endpoint'];
-            }
-            if (!empty($parameters['apikey'])) {
-                $apiKey = $parameters['apikey'];
-            }
-
+			// URL changes if we use a sandbox
+			$url = (empty($this->paramConnexion['sandbox']) ? $this->prodBaseUrl : $this->stagingBaseUrl);
             $curl = curl_init();
             curl_setopt_array($curl, [
                 CURLOPT_URL => $url.'/'.$endpoint,
@@ -311,7 +426,7 @@ class yousigncore extends solution
                 CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
                 CURLOPT_CUSTOMREQUEST => 'GET',
                 CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer '.$apiKey,
+                    'Authorization: Bearer '.$this->paramConnexion['apikey'],
                     'Content-Type: application/json',
                 ],
             ]);
@@ -327,7 +442,7 @@ class yousigncore extends solution
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
-
+// echo '$error '.$error.chr(10);
             return false;
         }
     }
@@ -402,6 +517,39 @@ class yousigncore extends solution
     public function cleanUpQueryStringFilter(string $queryString): string
     {
         return urlencode($queryString);
+    }
+	
+	/**
+     * Determines which query string to add to the GET request to the YouSign API
+     * depending on the module (not all modules are born equal).
+     *
+     * @param string $module
+     * @param array|null $queryStringParams
+     * @return string
+     */
+    public function determineQueryStringBasedOnModule(string $module, ?array $queryStringParams) :string
+    {
+        $dateRef = $queryStringParams['date_ref'];
+        switch ($module) {
+            case 'users':
+                $queryString = "";
+                break;
+
+            case 'files':
+                $id= $queryStringParams['file_id'];
+                $queryString = "?id=$id";
+                break;
+
+            case 'procedures':
+                $queryString = "?updatedAt[strictly_after]=$dateRef";
+                break;
+            
+            default:
+            $queryString = "";
+                break;
+        }  
+        return $queryString;
+        
     }
 }
 
