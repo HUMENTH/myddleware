@@ -204,38 +204,15 @@ class yousigncore extends solution
      * @return array|bool
      */
     public function read($param)
-    {
-// print_r($param);
-        // try {
-		
+    {	
 		// We don't use limit because we can't sort data by updated date. We could miss records if we use limit.
 		$nbPage = 1;
 		$result = array();
 		// Get the module used for API call (check sub module level 1, e.g memebers->procedures)
-// echo '$module : '.$param['module'].chr(10);
-		$moduleApi = (!empty($this->parentModules[$param['module']]['parentModule']) ? $this->parentModules[$param['module']]['parentModule'] : $param['module']);
-// echo '$moduleApi : '.$moduleApi.chr(10);
+		$moduleApi = (!empty($this->parentModules[$param['module']]['parentModule']) ? $this->parentModules[$param['module']]['parentModule'] : $param['module']);	
 		// Get the module used for API call (check sub module level 2, e.g file_objects->memebers->procedures)
 		$moduleApi = (!empty($this->parentModules[$moduleApi]) ? $this->parentModules[$moduleApi]['parentModule'] : $moduleApi);
-// echo '$moduleApi : '.$moduleApi.chr(10);
-// return null;
-		// $endpoint = $module;
-		/* if ('download_files' === $module) {
-			$moduleApi = 'files';
-			// TODO: find a way to pass the file ID as a GET parameter to our request in order to download the base64 document
-			$endpoint = $moduleApi.'/{id}/download';
-		} */
-		// $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
-		// $param['fields'] = $this->addRequiredField($param['fields'], $param['module'], $param['ruleParams']['mode']);
-		
-		
-		/* if (empty($param['limit'])) {
-			$param['limit'] = $this->callLimit;
-		} else {
-			if ($param['limit'] < $this->callLimit) {
-				$this->callLimit = $param['limit'];
-			}
-		} */
+
 		// Yousign use only date as filter, not datetime
 		$dateRef = $this->removeTimeFromDateRef($param['date_ref']);
 		// We read all data from the day (not hour) of the refrerence date and we keep only the ones with an updatedDate (datetime type) > dateRef (with time)
