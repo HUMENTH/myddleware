@@ -28,9 +28,12 @@ declare(strict_types=1);
 
 namespace App\Solutions;
 
+use ApiPlatform\Core\EventListener\DeserializeListener;
+use Normalizer;
 use stdClass;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Serializer\Encoder\JsonDecode;
 
 /**
  * YouSign API Swagger documentation : https://swagger.yousign.com/
@@ -119,27 +122,21 @@ class yousigncore extends solution
     {
         parent::login($paramConnexion);
         try {
-            // if ('1' === $this->paramConnexion['sandbox']) {
-                // $this->paramConnexion['url'] = $this->stagingBaseUrl;
-            // } else {
-                // $this->paramConnexion['url'] = $this->prodBaseUrl;
-            // }
-
-            // $apiKey = $this->paramConnexion['apikey'];
-            // $endpoint = 'organizations';
-            // $parameters['apikey'] = $apiKey;
-            // $parameters['endpoint'] = $endpoint;
-            $result = $this->youSignCall('organizations');
-            if (!empty($result)) {
+            $result = $this->youSignCall('organizations');   
+                        
+            if (!empty($result) AND is_array(json_decode($result)) ) {                  
                 $this->connexion_valide = true;
-            } else {
+            } elseif(is_object(json_decode($result))){
+                $result = json_decode($result);
+                throw new \Exception('Failed to login '.$result->error.' and '. $result->error_description);                
+            } 
+            else{
                 throw new \Exception('Failed to connect but no error returned by YouSign API.');
             }
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
-
-            return ['error' => $error];
+            return ['error' => $e->getMessage()];
         }
     }
 
