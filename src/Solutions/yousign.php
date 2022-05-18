@@ -28,12 +28,9 @@ declare(strict_types=1);
 
 namespace App\Solutions;
 
-use ApiPlatform\Core\EventListener\DeserializeListener;
-use Normalizer;
 use stdClass;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
-use Symfony\Component\Serializer\Encoder\JsonDecode;
 
 /**
  * YouSign API Swagger documentation : https://swagger.yousign.com/
@@ -81,10 +78,7 @@ class yousigncore extends solution
 									)
 								);		
 
-	// protected $parentModules = array(
-									// 'members' => array('parentModule' => 'procedures', 'key' => 'members'),
-									// 'file_objects' => array('parentModule' => 'members', 'key' => 'fileObjects')
-								// );
+
     /**
      * Fields displayed on UI for user to fill in in order to be able to log in to the YouSign API.
      * The Sandbox field only accepts '0' and '1' and acts as a boolean to determine which base URL to use.
@@ -122,21 +116,17 @@ class yousigncore extends solution
     {
         parent::login($paramConnexion);
         try {
-            $result = $this->youSignCall('organizations');   
-                        
-            if (!empty($result) AND is_array(json_decode($result)) ) {                  
+            $result = $this->youSignCall('organizations');
+            if (!empty($result)) {
                 $this->connexion_valide = true;
-            } elseif(is_object(json_decode($result))){
-                $result = json_decode($result);
-                throw new \Exception('Failed to login '.$result->error.' and '. $result->error_description);                
-            } 
-            else{
+            } else {
                 throw new \Exception('Failed to connect but no error returned by YouSign API.');
             }
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
-            return ['error' => $e->getMessage()];
+
+            return ['error' => $error];
         }
     }
 
@@ -464,7 +454,6 @@ class yousigncore extends solution
         } catch (\Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
-// echo '$error '.$error.chr(10);
             return false;
         }
     }
