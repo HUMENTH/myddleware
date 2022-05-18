@@ -696,6 +696,8 @@ class suitecrmcore extends solution
     // Permet de mettre à jour un enregistrement
     public function updateData($param)
     {
+print_r($param);
+return null;		
         // Transformation du tableau d'entrée pour être compatible webservice Sugar
         foreach ($param['data'] as $idDoc => $data) {
             try {
@@ -725,6 +727,7 @@ class suitecrmcore extends solution
 
                 $get_entry_list_result = $this->call('set_entry', $setEntriesListParameters);
                 if (!empty($get_entry_list_result->id)) {
+					// In case of module note with attachement, we generate a second call to add the file
                     $result[$idDoc] = [
                         'id' => $get_entry_list_result->id,
                         'error' => false,

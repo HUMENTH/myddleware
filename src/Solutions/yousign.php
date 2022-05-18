@@ -366,6 +366,54 @@ class yousigncore extends solution
 		// Return result with only the fields requested and records with updatedDate > date_ref
         return $result;
     }
+	
+	// Function used to check if the source solution has to be called before we send data to the target solution
+	public function sourceCallRequestedBeforeSend($send) {	
+		// In case the file content is requested, we return that YouSign has to be called to get the file content before sending data
+		if ($send['rule']['module_source'] == 'file_objects') {
+			if (!empty($send['ruleFields'])) {
+				foreach ($send['ruleFields'] as $ruleField) {
+					if($ruleField['source_field_name'] == 'file__content') {
+						return true;						
+					}
+				}
+			}
+		}
+		return false;
+	}
+	
+	// Action to be done into the source solution before sending data
+	public function sourceActionBeforeSend($send) {	
+		// In case the file content is requested, we return that YouSign has to be called to get the file content before sending data
+		if ($send['rule']['module_source'] == 'file_objects') {
+			if (!empty($send['ruleFields'])) {
+				foreach ($send['ruleFields'] as $ruleField) {
+					if($ruleField['source_field_name'] == 'file__content') {
+						// Get the file content
+						if (!empty($send['data'])) {
+							foreach ($send['data'] as $docId => $record) {
+								// Get the file id from the source data 
+								if (!isset($send['source'][$docId]['file__id'])) {
+									throw new \Exception('file__id is required if you want to send file content tp the target application. Please concen your document, map the field file__id into you rule. Then run again this document.' );
+								}
+								// Downloads file content and return it into file_content field
+								if (!empty($send['source'][$docId]['file__id'])) {					
+									$endpoint = 'files/'.$this->cleanId($send['source'][$docId]['file__id']).'/download';								
+									$responseYouSign = $this->youSignCall($endpoint);
+									if (empty($responseYouSign)) {
+										throw new \Exception('File content not returned by YouSign'.(empty($response->title) ? '.' : $response->title.' - '.$response->detail.' ('.$response->type.')'));
+									}
+									// Add content to send data
+									$send['data'][$docId]['file__content'] = $responseYouSign;
+								}
+							}
+						}						
+					}
+				}
+			}
+		}
+		return $send;
+	}
 
 	// Format id are like /<module>/id, this function returns only the id
 	protected function cleanId($id){

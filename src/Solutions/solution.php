@@ -603,6 +603,17 @@ class solutioncore
     {
     }
 
+	// Function used to check if the source solution has to be called before we send data to the target solution
+	public function sourceCallRequestedBeforeSend($send)
+    {	
+		return false;
+	}
+
+	// Action to be done into the source solution before sending data
+	public function sourceActionBeforeSend($send) {	
+		return $send;
+	}
+	
     public function setApi($api)
     {
         $this->api = $api;
