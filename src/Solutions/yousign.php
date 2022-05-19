@@ -195,11 +195,17 @@ class yousigncore extends solution
 		// We don't use limit because we can't sort data by updated date. We could miss records if we use limit.
 		$nbPage = 1;
 		$result = array();
-		// Get the module used for API call (check sub module level 1, e.g memebers->procedures)
-		$moduleApi = (!empty($this->parentModules[$param['module']]['parentModule']) ? $this->parentModules[$param['module']]['parentModule'] : $param['module']);	
-		// Get the module used for API call (check sub module level 2, e.g file_objects->memebers->procedures)
-		$moduleApi = (!empty($this->parentModules[$moduleApi]) ? $this->parentModules[$moduleApi]['parentModule'] : $moduleApi);
-
+		// If call by date_ref, we use the parent module (ex: procedure) because only parent module can read by date
+		// But search by id is available for all modules
+		if (!empty($param['query']['id'])) {
+			$moduleApi = $param['module'];
+		} else {
+			// Get the module used for API call (check sub module level 1, e.g memebers->procedures)
+			$moduleApi = (!empty($this->parentModules[$param['module']]['parentModule']) ? $this->parentModules[$param['module']]['parentModule'] : $param['module']);	
+			// Get the module used for API call (check sub module level 2, e.g file_objects->memebers->procedures)
+			$moduleApi = (!empty($this->parentModules[$moduleApi]) ? $this->parentModules[$moduleApi]['parentModule'] : $moduleApi);
+		}
+		
 		// Yousign use only date as filter, not datetime
 		$dateRef = $this->removeTimeFromDateRef($param['date_ref']);
 		// We read all data from the day (not hour) of the refrerence date and we keep only the ones with an updatedDate (datetime type) > dateRef (with time)
@@ -212,11 +218,12 @@ class yousigncore extends solution
 			} else {
 				$endpoint = $moduleApi.'?itemsPerPage='.$this->callLimit.'&pagination=true&page='.$nbPage.'&updatedAt[after]='.$dateRef;	
 			}
-			// Call YouSign API
+	
+			// Call YouSign API			
 			$responseYouSign = $this->youSignCall($endpoint);
+			
 			// Format response
 			if (!empty($responseYouSign)) {
-				$responseYouSign = json_decode($responseYouSign);
 				// Add a dimension to the array if the call is executed with an id. By this way we will get the same format result than the call by reference date
 				if (empty($param['query']['id'])) {
 					$response = $responseYouSign;
@@ -228,8 +235,8 @@ class yousigncore extends solution
 			if (!empty($response->title)) {
 				throw new \Exception('Failed to read '.$moduleApi.' : '.$response->title.' - '.$response->detail.' ('.$response->type.')');
 			}
-			// Format and filter result
-			$resultCall = $this->transformResponseToMyddlewareResultsFormat($response, $param);
+			// Format and filter result		
+			$resultCall = $this->transformResponseToMyddlewareResultsFormat($response, $param);			
 			// Merge the result call for the current page into the global result
 			if (!empty($resultCall)) {
 				$result = array_merge($result,$resultCall);
@@ -242,8 +249,7 @@ class yousigncore extends solution
 				!empty($response)
 			AND count($response) >= $this->callLimit
 			AND empty($param['query']['id'])
-		);
-
+		);			
         return $result;
     }
 
@@ -264,7 +270,10 @@ class yousigncore extends solution
 			// Browse the module to check if it is a main module (procedure) , a sub module (members) or a sub sub module (file_objects) 
 			// Example level 1 members		: members->procedures
 			// Example level 2 file_objects : file_objects->members->procedures
-			if (!empty($this->parentModules[$module]['parentModule'])) {
+			if (
+					!empty($this->parentModules[$module]['parentModule'])
+				AND empty($param['query']['id'])	// No search in parent module if we search a specific id	
+			) {
 				// Get parent module data 
 				// Example level 1 (file_objects) : $parentModule = members ; $moduleKey = fileObjects 
 				$moduleKey = $this->parentModules[$module]['key'];
@@ -370,7 +379,7 @@ class yousigncore extends solution
 	}
 	
 	// Action to be done into the source solution before sending data
-	public function sourceActionBeforeSend($send) {	
+	public function sourceActionBeforeSend($send) {		
 		// In case the file content is requested, we return that YouSign has to be called to get the file content before sending data
 		if ($send['rule']['module_source'] == 'file_objects') {
 			if (!empty($send['ruleFields'])) {
@@ -384,22 +393,26 @@ class yousigncore extends solution
 									throw new \Exception('file__id is required if you want to send file content tp the target application. Please concen your document, map the field file__id into you rule. Then run again this document.' );
 								}
 								// Downloads file content and return it into file_content field
-								if (!empty($send['source'][$docId]['file__id'])) {					
+								if (!empty($send['source'][$docId]['file__id'])) {	
 									$endpoint = 'files/'.$this->cleanId($send['source'][$docId]['file__id']).'/download';								
 									$responseYouSign = $this->youSignCall($endpoint);
-									if (empty($responseYouSign)) {
-										throw new \Exception('File content not returned by YouSign'.(empty($response->title) ? '.' : $response->title.' - '.$response->detail.' ('.$response->type.')'));
-									}
+									if (
+											empty($responseYouSign)
+										 OR !empty($responseYouSign->error)
+									) {
+										throw new \Exception('File content not returned by YouSign'.(empty($responseYouSign->error) ? '.' : $responseYouSign->error.' - '.$responseYouSign->error_description));
+									}							
 									// Add content to send data
-									$send['data'][$docId]['file__content'] = $responseYouSign;
+									$send['source'][$docId]['file__content'] = $responseYouSign;
+									$this->fieldsChangedBeforeSend[] = 'file__content';
 								}
 							}
 						}						
 					}
 				}
 			}
-		}
-		return $send;
+		}	
+		return parent::sourceActionBeforeSend($send);
 	}
 
 	// Format id are like /<module>/id, this function returns only the id
@@ -414,49 +427,6 @@ class yousigncore extends solution
 		return $id;
 	}
 	
-    /**
-     * GET cURL call to YouSign API endpoints (modules).
-     *
-     * @param string $url
-     * @param array  $parameters : the APIkey is required on ALL endpoints
-     *
-     * @return string|bool
-     */
-    protected function youSignCall($endpoint)
-    {
-        try {
-			// URL changes if we use a sandbox
-			$url = (empty($this->paramConnexion['sandbox']) ? $this->prodBaseUrl : $this->stagingBaseUrl);
-            $curl = curl_init();
-            curl_setopt_array($curl, [
-                CURLOPT_URL => $url.'/'.$endpoint,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING => '',
-                CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 0,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-                CURLOPT_CUSTOMREQUEST => 'GET',
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer '.$this->paramConnexion['apikey'],
-                    'Content-Type: application/json',
-                ],
-            ]);
-            $response = curl_exec($curl);
-            $err = curl_error($curl);
-            curl_close($curl);
-            if ($err) {
-                $this->logger->error($err);
-                throw new \Exception('cURL Error #: '.$err);
-            }
-
-            return $response;
-        } catch (\Exception $e) {
-            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
-            $this->logger->error($error);
-            return false;
-        }
-    }
 
     /**
      * Returns the reference date field name according to the module & rulemode.
@@ -561,6 +531,50 @@ class yousigncore extends solution
         }  
         return $queryString;
         
+    }
+	
+	/**
+     * GET cURL call to YouSign API endpoints (modules).
+     *
+     * @param string $url
+     * @param array  $parameters : the APIkey is required on ALL endpoints
+     *
+     * @return string|bool
+     */
+    protected function youSignCall($endpoint)
+    {
+        try {
+			// URL changes if we use a sandbox
+			$url = (empty($this->paramConnexion['sandbox']) ? $this->prodBaseUrl : $this->stagingBaseUrl);
+            $curl = curl_init();
+            curl_setopt_array($curl, [
+                CURLOPT_URL => $url.'/'.$endpoint,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_ENCODING => '',
+                CURLOPT_MAXREDIRS => 10,
+                CURLOPT_TIMEOUT => 0,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                CURLOPT_CUSTOMREQUEST => 'GET',
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer '.$this->paramConnexion['apikey'],
+                    'Content-Type: application/json',
+                ],
+            ]);
+            $response = curl_exec($curl);
+            $err = curl_error($curl);
+            curl_close($curl);
+            if ($err) {
+                $this->logger->error($err);
+                throw new \Exception('cURL Error #: '.$err);
+            }
+
+            return json_decode($response);
+        } catch (\Exception $e) {
+            $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
+            $this->logger->error($error);
+            return false;
+        }
     }
 }
 
