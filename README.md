@@ -46,7 +46,7 @@ If you are familiar with Git, Github & command lines, you can clone our [Github 
 
 #### Setting up the project
 
-At the root of your webserver (for example /var/wwww/html), open a terminal and type the following command:
+At the root of your webserver (for example /var/www/html), open a terminal and type the following command:
 
 ```git
 git clone git@github.com:Myddleware/myddleware.git 
