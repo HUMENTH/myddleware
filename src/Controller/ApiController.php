@@ -2,59 +2,37 @@
 
 namespace App\Controller;
 
-use Doctrine\ORM\EntityManagerInterface;
-use Exception;
 use App\Manager\JobManager;
 use App\Manager\RuleManager;
 use App\Repository\DocumentRepository;
 use App\Repository\JobRepository;
 use App\Repository\RuleRepository;
+use Doctrine\ORM\EntityManagerInterface;
+use Exception;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\HttpKernel\KernelInterface;
+use Symfony\Component\Routing\Annotation\Route;
 
 /**
  * @Route("/api", name="api_")
  */
 class ApiController extends AbstractController
 {
-    /**
-     * @var RuleRepository
-     */
     private RuleRepository $ruleRepository;
-    /**
-     * @var JobRepository
-     */
     private JobRepository $jobRepository;
-    /**
-     * @var DocumentRepository
-     */
     private DocumentRepository $documentRepository;
-    /**
-     * @var string
-     */
     private string $env;
-    /**
-     * @var KernelInterface
-     */
     private KernelInterface $kernel;
-    /**
-     * @var LoggerInterface
-     */
     private LoggerInterface $logger;
-    /**
-     * @var JobManager
-     */
     private JobManager $jobManager;
-
     private ParameterBagInterface $parameterBag;
-
     private EntityManagerInterface $entityManager;
 
     public function __construct(
@@ -81,7 +59,7 @@ class ApiController extends AbstractController
     /**
      * @Route("/synchro", name="synchro", methods={"POST"})
      */
-    public function synchroAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function synchroAction(Request $request): JsonResponse
     {
         try {
             $return = [];
@@ -89,6 +67,7 @@ class ApiController extends AbstractController
 
             // Get input data
             $data = json_decode($request->getContent(), true);
+            $force = !(('ALL' === $data['rule']));
 
             // Check parameter
             if (empty($data['rule'])) {
@@ -100,6 +79,7 @@ class ApiController extends AbstractController
             $application->setAutoExit(false);
             $arguments = [
                 'command' => 'myddleware:synchro',
+                'force' => $force,
                 'api' => 1,
                 '--env' => $this->env,
             ];
@@ -124,7 +104,8 @@ class ApiController extends AbstractController
             $return['jobId'] = substr($content, 2, 23);
             $job = $this->jobRepository->find($return['jobId']);
             // Get the job statistics
-            $jobData = $this->jobManager->getLogData($job);
+            $this->jobManager->setId($job->getId());
+            $jobData = $this->jobManager->getLogData();
             if (!empty($jobData['jobError'])) {
                 throw new Exception('Failed to get the job statistics. '.$jobData['jobError']);
             }
@@ -140,14 +121,16 @@ class ApiController extends AbstractController
     /**
      * @Route("/read_record", name="read_record", methods={"POST"})
      */
-    public function readRecordAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function readRecordAction(Request $request): JsonResponse
     {
         try {
             $return = [];
             $return['error'] = '';
 
             // Get input data
-            $data = $request->request->all();
+            //use request content
+            $rawData = $request->getContent();
+            $data = json_decode($rawData, true);
 
             // Check parameter
             if (empty($data['rule'])) {
@@ -165,6 +148,7 @@ class ApiController extends AbstractController
             $application->setAutoExit(false);
             $arguments = [
                 'command' => 'myddleware:readrecord',
+                'force' => 1,
                 'api' => 1,
                 '--env' => $this->env,
             ];
@@ -192,7 +176,8 @@ class ApiController extends AbstractController
 
             // Get the job statistics
             $job = $this->jobRepository->find($return['jobId']);
-            $jobData = $this->jobManager->getLogData($job);
+            $this->jobManager->setId($job->getId());
+            $jobData = $this->jobManager->getLogData();
             if (!empty($jobData['jobError'])) {
                 throw new Exception('Failed to get the job statistics. '.$jobData['jobError']);
             }
@@ -208,7 +193,7 @@ class ApiController extends AbstractController
     /**
      * @Route("/delete_record", name="delete_record", methods={"POST"})
      */
-    public function deleteRecordAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function deleteRecordAction(Request $request): JsonResponse
     {
         try {
             $connection = $this->container->get('database_connection');
@@ -263,7 +248,7 @@ class ApiController extends AbstractController
                 $this->formulaManager,
                 $this->solutionManager,
                 $this->documentManager
-                );
+            );
 
             $document = $rule->generateDocuments($data['recordId'], false, $docParam);
             // Stop the process if error during the data transfer creation as we won't be able to manage it in Myddleware
@@ -302,7 +287,7 @@ class ApiController extends AbstractController
             // Get the job statistics even if the job has failed
             if (!empty($job->id)) {
                 $return['jobId'] = $job->id;
-                $jobData = $job->getLogData(1);
+                $jobData = $job->getLogData();
                 if (!empty($jobData['jobError'])) {
                     $return['error'] .= $jobData['jobError'];
                 }
@@ -321,7 +306,7 @@ class ApiController extends AbstractController
     /**
      * @Route("/mass_action", name="mass_action", methods={"POST"})
      */
-    public function massActionAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function massActionAction(Request $request): JsonResponse
     {
         try {
             $return = [];
@@ -346,6 +331,7 @@ class ApiController extends AbstractController
             $application->setAutoExit(false);
             $arguments = [
                 'command' => 'myddleware:massaction',
+                'force' => 1,
                 'api' => 1,
                 '--env' => $this->env,
             ];
@@ -377,7 +363,7 @@ class ApiController extends AbstractController
             // Get the job statistics
             $job = $this->container->get('myddleware_job.job');
             $job->id = $return['jobId'];
-            $jobData = $job->getLogData(1);
+            $jobData = $job->getLogData();
             if (!empty($jobData['jobError'])) {
                 throw new Exception('Failed to get the job statistics. '.$jobData['jobError']);
             }
@@ -393,7 +379,7 @@ class ApiController extends AbstractController
     /**
      * @Route("/rerun_error", name="rerun_error", methods={"POST"})
      */
-    public function rerunErrorAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function rerunErrorAction(Request $request): JsonResponse
     {
         try {
             $return = [];
@@ -415,6 +401,7 @@ class ApiController extends AbstractController
             $application->setAutoExit(false);
             $arguments = [
                 'command' => 'myddleware:rerunerror',
+                'force' => 1,
                 'api' => 1,
                 '--env' => $this->env,
             ];
@@ -442,7 +429,7 @@ class ApiController extends AbstractController
             // Get the job statistics
             $job = $this->container->get('myddleware_job.job');
             $job->id = $return['jobId'];
-            $jobData = $job->getLogData(1);
+            $jobData = $job->getLogData();
             $return['jobData'] = $jobData;
         } catch (Exception $e) {
             $this->logger->error($e->getMessage());
@@ -455,7 +442,7 @@ class ApiController extends AbstractController
     /**
      * @Route("/statistics", name="statistics", methods={"POST"})
      */
-    public function statisticsAction(Request $request): \Symfony\Component\HttpFoundation\JsonResponse
+    public function statisticsAction(Request $request): JsonResponse
     {
         try {
             $return = [];

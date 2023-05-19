@@ -30,25 +30,29 @@ use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 //use Psr\LoggerInterface;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 
-//require_once('lib/lib_moodle.php');
-
 class moodlecore extends solution
 {
     protected $moodleClient;
-    protected $required_fields = [
+    protected array $required_fields = [
         'default' => ['id'],
         'get_users_completion' => ['id', 'timemodified'],
         'get_users_last_access' => ['id', 'lastaccess'],
         'get_course_completion_by_date' => ['id', 'timecompleted'],
         'get_user_grades' => ['id', 'timemodified'],
+        'groups' => ['id', 'timemodified'],
+        'group_members' => ['id', 'timeadded'],
     ];
 
-    protected $FieldsDuplicate = [
+    protected array $FieldsDuplicate = [
         'users' => ['email', 'username'],
         'courses' => ['shortname', 'idnumber'],
     ];
 
-    protected $delaySearch = '-1 year';
+	protected array $createOnlyFields = [
+        'courses' => ['lang'],
+    ];
+	
+    protected string $delaySearch = '-1 year';
 
     public function login($paramConnexion)
     {
@@ -65,7 +69,7 @@ class moodlecore extends solution
             if (!empty($xml->SINGLE->KEY[0]->VALUE)) {
                 $this->connexion_valide = true;
             } elseif (!empty($xml->ERRORCODE)) {
-                throw new \Exception($xml->ERRORCODE.' : '.$xml->MESSAGE);
+                throw new \Exception($xml->ERRORCODE.' : '.$xml->MESSAGE.(!empty($xml->DEBUGINFO) ? ' - '.$xml->DEBUGINFO : ''));
             } else {
                 throw new \Exception('Error unknown. ');
             }
@@ -77,7 +81,7 @@ class moodlecore extends solution
         }
     }
 
-    public function getFieldsLogin()
+    public function getFieldsLogin(): array
     {
         return [
             [
@@ -90,11 +94,21 @@ class moodlecore extends solution
                 'type' => PasswordType::class,
                 'label' => 'solution.fields.token',
             ],
+			[
+                'name' => 'user_custom_fields',
+                'type' => TextType::class,
+                'label' => 'solution.fields.user_custom_fields',
+            ],
+			[
+                'name' => 'course_custom_fields',
+                'type' => TextType::class,
+                'label' => 'solution.fields.course_custom_fields',
+            ],
         ];
     }
 
     // Permet de récupérer tous les modules accessibles à l'utilisateur
-    public function get_modules($type = 'source')
+    public function get_modules($type = 'source'): array
     {
         try {
             if ('source' == $type) {
@@ -108,6 +122,8 @@ class moodlecore extends solution
                     'get_user_compentencies_by_date' => 'Get user compentency',
                     'get_competency_module_completion_by_date' => 'Get compentency module completion',
                     'get_user_grades' => 'Get user grades',
+                    'groups' => 'Groups',
+					'group_members' => 'Group members',
                 ];
             }
 
@@ -121,12 +137,15 @@ class moodlecore extends solution
                 'notes' => 'Notes',
             ];
         } catch (\Exception $e) {
-            return false;
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+
+            return ['error' => $error];
         }
     }
 
     // Get the fields available for the module in input
-    public function get_module_fields($module, $type = 'source', $param = null)
+    public function get_module_fields($module, $type = 'source', $param = null): array
     {
         parent::get_module_fields($module, $type);
         try {
@@ -153,39 +172,81 @@ class moodlecore extends solution
                 }
             }
 
+			// Add user custom fields
+			$this->addCustomFields($module, $type, $param);
             return $this->moduleFields;
         } catch (\Exception $e) {
-            return false;
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+
+            return ['error' => $error];
         }
     }
 
     // Read data in Moodle
     // public function readData($param)
-    public function read($param)
+    public function read($param): array
     {
         try {
             $result = [];
-
             // Set parameters to call Moodle
             $parameters = $this->setParameters($param);
             // Get function to call Moodle
             $functionName = $this->getFunctionName($param);
+            // Get the custom fields set in the connector
+            $customFieldList = $this->getCustomFields($param);
+            // Init the attribute value for custom fields depending on the module
+            $attributeValue = ($param['module'] == 'courses' ? 'valueraw' : 'value');
 
             // Call to Moodle
             $serverurl = $this->paramConnexion['url'].'/webservice/rest/server.php'.'?wstoken='.$this->paramConnexion['token'].'&wsfunction='.$functionName;
             $response = $this->moodleClient->post($serverurl, $parameters);
             $xml = $this->formatResponse('read', $response, $param);
+
             if (!empty($xml->ERRORCODE)) {
                 throw new \Exception("Error $xml->ERRORCODE : $xml->MESSAGE");
             }
-
             // Transform the data to Myddleware format
             if (!empty($xml->MULTIPLE->SINGLE)) {
                 foreach ($xml->MULTIPLE->SINGLE as $data) {
+                    $row = array();
+                    // Init custom fields to empty because Moodle returns custom field only if they exist for the current record
+                    if (!empty($customFieldList)) {
+                        foreach($customFieldList as $custom) {
+                            $row[$custom] = '';
+                        }
+                    }
                     foreach ($data as $field) {
                         // Get all the requested fields
-                        if (false !== array_search($field->attributes()->__toString(), $param['fields'])) {
+                        if (array_search($field->attributes()->__toString(), $param['fields']) !== false) {
                             $row[$field->attributes()->__toString()] = $field->VALUE->__toString();
+                        }
+                        // Manage custom field
+                        elseif (
+                                $field->attributes()->__toString() == 'customfields'
+                            AND !empty($customFieldList)
+                        ) {
+                            // Get the curstom field values
+                            // Loop on each custom field returns by Moodle
+                            foreach($field->MULTIPLE->SINGLE as $customField) {
+                                // Get the name and the value of each field
+                                $customFieldValue = '';
+                                $customFieldName = '';
+                                foreach($customField->KEY as $customFieldValues) {
+                                    if ($customFieldValues->attributes()->__toString() == 'shortname') {
+                                        $customFieldName = $customFieldValues->VALUE->__toString();
+                                    } elseif ($customFieldValues->attributes()->__toString() == $attributeValue) {
+                                        $customFieldValue = $customFieldValues->VALUE->__toString();
+                                    }
+                                }
+                                // Set the custom value to the output result
+                                if (
+                                        !empty($customFieldName)
+                                    AND in_array($customFieldName, $customFieldList)
+                                ) {
+                                    $row[$customFieldName] = $customFieldValue;
+                                }
+                            }
                         }
                     }
                     $result[] = $row;
@@ -193,28 +254,45 @@ class moodlecore extends solution
             }
         } catch (\Exception $e) {
             $result['error'] = 'Error : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($result['error']);
         }
-
         return $result;
     }
 
     // Permet de créer des données
-    public function createData($param)
+
+    /**
+     * @throws \Doctrine\DBAL\Exception
+     */
+    public function createData($param): array
     {
         // Transformation du tableau d'entrée pour être compatible webservice Sugar
         foreach ($param['data'] as $idDoc => $data) {
             try {
+                // Get the custom fields set in the connector
+                $customFieldList = $this->getCustomFields($param);
+
                 // Check control before create
                 $data = $this->checkDataBeforeCreate($param, $data, $idDoc);
                 $dataSugar = [];
                 $obj = new \stdClass();
                 foreach ($data as $key => $value) {
-                    // We don't send Myddleware_element_id field to Moodle
-                    if ('Myddleware_element_id' == $key) {
-                        continue;
-                    }
                     if (!empty($value)) {
-                        $obj->$key = $value;
+                        // if $value belongs to $this->paramConnexion[user_custom_fields] then we add it to $obj->customfields
+                        if (in_array($key, $customFieldList)) {
+                            $customField = new \stdClass();
+                            // Param names are differents depending on the module
+                            if($param['module'] == 'users') {
+                                $customField->type = $key;
+                            } elseif($param['module'] == 'courses') {
+                                $customField->shortname = $key; 
+                            }
+                            $customField->value = $value;
+                            $obj->customfields[] = $customField;
+                            
+                        } else {
+                            $obj->$key = $value;
+                        }
                     }
                 }
                 switch ($param['module']) {
@@ -258,7 +336,17 @@ class moodlecore extends solution
                 $serverurl = $this->paramConnexion['url'].'/webservice/rest/server.php'.'?wstoken='.$this->paramConnexion['token'].'&wsfunction='.$functionname;
                 $response = $this->moodleClient->post($serverurl, $params);
                 $xml = simplexml_load_string($response);
+				
+				// Check if there is a warning
+				if (
+						!empty($xml->SINGLE)
+					AND $xml->SINGLE->KEY->attributes()->__toString() == 'warnings'
+					AND !empty($xml->SINGLE->KEY->MULTIPLE->SINGLE->KEY[3])
+				) {
+					throw new \Exception('ERROR : '.$xml->SINGLE->KEY->MULTIPLE->SINGLE->KEY[3]->VALUE.chr(10));
+				}
 
+				
                 // Réponse standard pour les modules avec retours
                 if (
                         !empty($xml->MULTIPLE->SINGLE->KEY->VALUE)
@@ -308,24 +396,40 @@ class moodlecore extends solution
     }
 
     // Permet de mettre à jour un enregistrement
-    public function updateData($param)
+
+    /**
+     * @throws \Doctrine\DBAL\Exception
+     */
+    public function updateData($param): array
     {
         // Transformation du tableau d'entrée pour être compatible webservice Sugar
         foreach ($param['data'] as $idDoc => $data) {
             try {
                 // Check control before update
-                $data = $this->checkDataBeforeUpdate($param, $data);
+                $data = $this->checkDataBeforeUpdate($param, $data, $idDoc);
+                // Get the custom fields set in the connector
+                $customFieldList = $this->getCustomFields($param);
                 $dataSugar = [];
                 $obj = new \stdClass();
                 foreach ($data as $key => $value) {
                     if ('target_id' == $key) {
                         continue;
-                    // We don't send Myddleware_element_id field to Moodle
-                    } elseif ('Myddleware_element_id' == $key) {
-                        continue;
-                    }
+                    } 
                     if (!empty($value)) {
-                        $obj->$key = $value;
+                        // if $value belongs to $this->paramConnexion[user_custom_fields] then we add it to $obj->customfields
+                        if (in_array($key, $customFieldList)) {
+                            $customField = new \stdClass();
+                            // Param names are differents depending on the module
+                            if($param['module'] == 'users') {
+                                $customField->type = $key;
+                            } elseif($param['module'] == 'courses') {
+                                $customField->shortname = $key;
+                            }
+                            $customField->value = $value;
+                            $obj->customfields[] = $customField;
+                        } else {
+                            $obj->$key = $value;
+                        }
                     }
                 }
 
@@ -369,6 +473,15 @@ class moodlecore extends solution
                 $serverurl = $this->paramConnexion['url'].'/webservice/rest/server.php'.'?wstoken='.$this->paramConnexion['token'].'&wsfunction='.$functionname;
                 $response = $this->moodleClient->post($serverurl, $params);
                 $xml = simplexml_load_string($response);
+				
+				// Check if there is a warning
+				if (
+						!empty($xml)
+					AND $xml->SINGLE->KEY->attributes()->__toString() == 'warnings'
+					AND !empty($xml->SINGLE->KEY->MULTIPLE->SINGLE->KEY[3])
+				) {
+					throw new \Exception('ERROR : '.$xml->SINGLE->KEY->MULTIPLE->SINGLE->KEY[3]->VALUE.chr(10));
+				}
 
                 // Réponse standard pour les modules avec retours
                 if (!empty($xml->ERRORCODE)) {
@@ -405,10 +518,32 @@ class moodlecore extends solution
         return $result;
     }
 
+	// Check data before update
+    // Add a throw exeption if error
+    protected function checkDataBeforeUpdate($param, $data, $idDoc=null)
+    {
+		// createpassword field can be oly used in creation
+		if (
+				$param['module'] == 'users'
+			AND isset($data['createpassword'])
+		) {
+			unset($data['createpassword']);
+		}
+		// Rempove create only field
+		if (!empty($this->createOnlyFields[$param['module']])) {
+			foreach($this->createOnlyFields[$param['module']] as $createOnlyField) {
+				if (isset($data[$createOnlyField])) {
+					unset($data[$createOnlyField]);
+				}
+			}
+		}
+        return parent::checkDataBeforeUpdate($param, $data, $idDoc);
+    }
+
     // Permet de renvoyer le mode de la règle en fonction du module target
     // Valeur par défaut "0"
     // Si la règle n'est qu'en création, pas en modicication alors le mode est C
-    public function getRuleMode($module, $type)
+    public function getRuleMode($module, $type): array
     {
         if (
                 'target' == $type
@@ -432,6 +567,10 @@ class moodlecore extends solution
     }
 
     // Function de conversion de datetime format Myddleware à un datetime format solution
+
+    /**
+     * @throws \Exception
+     */
     protected function dateTimeFromMyddleware($dateTime)
     {
         $date = new \DateTime($dateTime);
@@ -454,7 +593,7 @@ class moodlecore extends solution
     }
 
     // Get the function name
-    protected function getFunctionName($param)
+    protected function getFunctionName($param): string
     {
         // In case of duplicate search (search with a criteria)
         if (
@@ -473,6 +612,10 @@ class moodlecore extends solution
                 return 'local_myddleware_get_users_by_date';
             } elseif ('courses' == $param['module']) {
                 return 'local_myddleware_get_courses_by_date';
+            } elseif ('groups' == $param['module']) {
+                return 'local_myddleware_get_groups_by_date';
+            } elseif ('group_members' == $param['module']) {
+                return 'local_myddleware_get_group_members_by_date';
             }
         }
         // In all other cases
@@ -480,7 +623,11 @@ class moodlecore extends solution
     }
 
     // Prepare parameters for read function
-    protected function setParameters($param)
+
+    /**
+     * @throws \Exception
+     */
+    protected function setParameters($param): array
     {
         $functionName = $this->getFunctionName($param);
         $parameters['time_modified'] = $this->dateTimeFromMyddleware($param['date_ref']);
@@ -506,20 +653,80 @@ class moodlecore extends solution
     }
 
     // Renvoie le nom du champ de la date de référence en fonction du module et du mode de la règle
-    public function getRefFieldName($moduleSource, $RuleMode)
+    public function getRefFieldName($param): string
     {
-        switch ($moduleSource) {
+        switch ($param['module']) {
             case 'get_course_completion_by_date':
                 return 'timecompleted';
                 break;
             case 'get_users_last_access':
                 return 'lastaccess';
                 break;
+            case 'users': 
+				$functionName = $this->getFunctionName($param);
+				if ($functionName == 'core_user_get_users') { // Only use to get one user (history purpose)
+					return 'id';
+				} else {
+					return 'timemodified';
+				}
+                break;
+            case 'group_members': 
+                return 'timeadded';
+                break; 
             default:
                 return 'timemodified';
                 break;
         }
     }
+
+    // Get the custom fields depending on the module
+    protected function getCustomFields ($param) {
+        // User and course Moodle fields aren't stored in the same parameter
+        if (
+                $param['module'] == 'users'
+            AND !empty($this->paramConnexion['user_custom_fields'])
+        ) {
+            return explode(',',$this->paramConnexion['user_custom_fields']);
+        }
+        if (
+                $param['module'] == 'courses'
+            AND !empty($this->paramConnexion['course_custom_fields'])
+        ) {
+            return explode(',',$this->paramConnexion['course_custom_fields']);
+        } 
+        return array();
+    }
+
+	// Function to add custom fields for course and user modules.
+	// The custom fields are stored into the connector parameters
+	protected function addCustomFields($module, $type, $param) {
+		$customFields = array();
+		// Check if custom fields exist
+		if (
+				$module == 'users'
+			AND !empty($this->paramConnexion['user_custom_fields'])
+		) {
+			$customFields = explode(',',$this->paramConnexion['user_custom_fields']);
+		} elseif (
+				$module == 'courses'
+			AND !empty($this->paramConnexion['course_custom_fields'])
+		) {
+			$customFields = explode(',',$this->paramConnexion['course_custom_fields']);
+		}
+		// Add the custom fields in the attribute $moduleFields
+		if (!empty($customFields)) {
+			foreach ($customFields as $customField) {
+				$this->moduleFields[$customField] = [
+					'label' => $customField,
+					'type' => 'varchar(255)',
+					'type_bdd' => 'varchar(255)',
+					'required' => 0,
+					'required_relationship' => 0,
+					'relate' => false,
+				];
+			}
+		}
+	}
 }
 
 class moodle extends moodlecore

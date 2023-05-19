@@ -15,21 +15,9 @@ class DemoteUserCommand extends Command
 {
     protected static $defaultName = 'myddleware:demote-user';
     protected static $defaultDescription = 'Demote an Myddleware existing user by removing a role';
-
-    /**
-     * @var EntityManagerInterface
-     */
-    private $em;
-
-    /**
-     * @var UserRepository
-     */
-    private $userRepository;
-
-    /**
-     * @var SymfonyStyle
-     */
-    private $io;
+    private EntityManagerInterface $em;
+    private UserRepository $userRepository;
+    private SymfonyStyle $io;
 
     public function __construct(EntityManagerInterface $em, UserRepository $userRepository)
     {

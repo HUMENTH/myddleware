@@ -44,6 +44,7 @@ use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\RouterInterface;
 use Symfony\Component\Yaml\Yaml;
 use Symfony\Contracts\Translation\TranslatorInterface;
+use PDO;
 
 class jobcore
 {
@@ -65,6 +66,14 @@ class jobcore
     protected int $api = 0; 	// Specify if the class is called by the API
     protected $env;
     protected int $nbDayClearJob = 7;
+	protected int $limitOfDeletePerRequest = 3;
+	protected int $limitOfRequestExecution = 10;
+	protected int $noDocumentsTablesToEmptyCounter;
+	protected int $noRulesTablesToEmptyCounter;
+
+    protected int $limitDelete;
+    protected int $nbCallMaxDelete = 50;
+    protected int $checkJobPeriod = 900;
 
     private ParameterBagInterface $parameterBagInterface;
 
@@ -132,6 +141,11 @@ class jobcore
     public function getId()
     {
         return $this->id;
+    }
+
+    public function setId($id)
+    {
+        $this->id = $id;
     }
 
     public function getMessage(): string
@@ -208,9 +222,9 @@ class jobcore
     }
 
     // Permet de contrôler si un docuement de la même règle pour le même enregistrement n'est pas close
-    public function ckeckPredecessorDocuments()
+    public function checkPredecessorDocuments()
     {
-        $this->ruleManager->ckeckPredecessorDocuments();
+        $this->ruleManager->checkPredecessorDocuments();
     }
 
     // Permet de filtrer les documents en fonction des filtres de la règle
@@ -220,9 +234,9 @@ class jobcore
     }
 
     // Permet de contrôler si un docuement a une relation mais n'a pas de correspondance d'ID pour cette relation dans Myddleware
-    public function ckeckParentDocuments()
+    public function checkParentDocuments()
     {
-        $this->ruleManager->ckeckParentDocuments();
+        $this->ruleManager->checkParentDocuments();
     }
 
     // Permet de trasformer les documents
@@ -273,6 +287,7 @@ class jobcore
                 foreach ($documentsError as $documentError) {
                     $this->ruleManager->setRule($documentError['rule_id']);
                     $this->ruleManager->setJobId($this->id);
+					$this->ruleManager->setManual($this->manual);
                     $this->ruleManager->setApi($this->api);
                     $errorActionDocument = $this->ruleManager->actionDocument($documentError['id'], 'rerun');
                     if (!empty($errorActionDocument)) {
@@ -289,21 +304,23 @@ class jobcore
     /**
      * @throws \Doctrine\DBAL\Exception
      */
-    public function initJob(string $paramJob): array
+    public function initJob(string $paramJob, bool $force = false): array
     {
         $this->paramJob = $paramJob;
         $this->id = uniqid('', true);
         $this->start = microtime(true);
-        // Check if a job is already running
-        $sqlJobOpen = "SELECT * FROM job WHERE status = 'Start' LIMIT 1";
-        $stmt = $this->connection->prepare($sqlJobOpen);
-        $result = $stmt->executeQuery();
-        $job = $result->fetchAssociative(); // 1 row
-        // Error if one job is still running
-        if (!empty($job)) {
-            $this->message .= $this->tools->getTranslation(['messages', 'rule', 'another_task_running']).';'.$job['id'];
+        // Check if a job is already running except if force = true (api call or manuel call)
+        if (!$force) {
+            $sqlJobOpen = "SELECT * FROM job WHERE status = 'Start' LIMIT 1";
+            $stmt = $this->connection->prepare($sqlJobOpen);
+            $result = $stmt->executeQuery();
+            $job = $result->fetchAssociative(); // 1 row
+            // Error if one job is still running
+            if (!empty($job)) {
+                $this->message .= $this->tools->getTranslation(['messages', 'rule', 'another_task_running']).';'.$job['id'];
 
-            return ['success' => false, 'message' => $this->message];
+                return ['success' => false, 'message' => $this->message];
+            }
         }
         // Create Job
         $insertJob = $this->insertJob();
@@ -339,6 +356,7 @@ class jobcore
             $paramJob[] = $event;
             $paramJob[] = $datatype;
             $paramJob[] = implode(',', $param);
+            $paramJob[] = 1; // Force run even if another task is running
 
             return $this->runBackgroundJob('massaction', $paramJob);
         } else {
@@ -366,7 +384,7 @@ class jobcore
             // Formatage des paramètres
             if (!empty($param)) {
                 foreach ($param as $valueParam) {
-                    $params .= "'".$valueParam."' ";
+                    $params .= $valueParam.' ';
                 }
             }
             // Get the php executable
@@ -380,7 +398,7 @@ class jobcore
             } catch (IOException $e) {
                 throw new Exception('An error occurred while creating your directory');
             }
-            exec($php.' '.__DIR__.'/../../bin/console myddleware:'.$job.' '.$params.' --env='.$this->env.'  > '.$fileTmp.' &');
+            exec($php.' '.__DIR__.'/../../bin/console myddleware:'.$job.' '.$params.' 1 --env='.$this->env.'  > '.$fileTmp.' &');
             $cpt = 0;
             // Boucle tant que le fichier n'existe pas
             while (!file_exists($fileTmp)) {
@@ -484,6 +502,7 @@ class jobcore
                     if ($param['ruleId'] != $document['rule_id']) {
                         $this->ruleManager->setApi($this->api);
                         $this->ruleManager->setJobId($this->id);
+						$this->ruleManager->setManual($this->manual);
                         $this->ruleManager->setRule($document['rule_id']);
                     }
                     $this->ruleManager->actionDocument($document['id'], $action, $toStatus);
@@ -502,7 +521,10 @@ class jobcore
     }
 
     // Fonction permettant d'annuler massivement des documents
-    public function readRecord($ruleId, $filterQuery, $filterValues): bool
+
+    // In order to add extra components to the function without disturbing its regular use, we added a flag argument.
+    // This $usesDocumentIds flag is either null or 1
+    public function readRecord($ruleId, $filterQuery, $filterValues, $usesDocumentIds = null): bool
     {
         try {
             // Get the filter values
@@ -524,7 +546,13 @@ class jobcore
             // We instanciate the rule
             $this->ruleManager->setRule($ruleId);
             $this->ruleManager->setJobId($this->id);
+			$this->ruleManager->setManual($this->manual);
             $this->ruleManager->setApi($this->api);
+
+            // We create an array that will match the initial structure of the function
+            if ($usesDocumentIds === 1) {
+                $arrayOfDocumentIds = [];
+            }
 
             // Try to read data for each values
             foreach ($filterValuesArray as $value) {
@@ -533,8 +561,13 @@ class jobcore
                 if (!empty($documents->error)) {
                     throw new Exception($documents->error);
                 }
-                // Run documents
-                if (!empty($documents)) {
+
+                // We assign the id to an id section of the array
+                if ($usesDocumentIds === 1) {
+                    $arrayOfDocumentIds[] = $documents[0]->id;
+                    continue;
+                } elseif (!empty($documents)) {
+                    // Run documents
                     foreach ($documents as $doc) {
                         $errors = $this->ruleManager->actionDocument($doc->id, 'rerun');
                         // Check errors
@@ -543,6 +576,12 @@ class jobcore
                         }
                     }
                 }
+            }
+
+            // Since the actionDocument takes a string and not an array of ids, we recompose the ids into a string separated by commas
+            if ($usesDocumentIds === 1) {
+                $stringOfDocumentIds = implode(',', $arrayOfDocumentIds);
+                $errors = $this->ruleManager->actionDocument($stringOfDocumentIds, 'rerun');
             }
         } catch (Exception $e) {
             $this->message .= 'Error : '.$e->getMessage();
@@ -555,16 +594,195 @@ class jobcore
     }
 
     // Remove all data flagged deleted in the database
-    public function pruneDatabase()
+    public function pruneDatabase(): void
     {
-        // Documents
-
-        // Rules
-
-        // Connectors
+        $this->noDocumentsTablesToEmptyCounter = 0;
+        $this->noRulesTablesToEmptyCounter = 0;
+        try {
+            $this->processDeletableItems($this->getListOfSqlDocumentParams(), 'document');
+            // Start deleteing rules when there is no more documents to delete
+            if($this->noDocumentsTablesToEmptyCounter === 4)
+            {
+                $this->processDeletableItems($this->documentSqlParams(), 'document');
+            }
+            if($this->noDocumentsTablesToEmptyCounter === 5)
+            {
+                $this->processDeletableItems($this->getListOfSqlRuleParams(), 'rule');
+                if ($this->noRulesTablesToEmptyCounter === 7)
+                {
+                    $this->processDeletableItems($this->ruleSqlParams(), 'rule');
+                }
+            }
+        } catch (Exception $e) {
+            $this->message .= 'Error  : ' . $e->getMessage() . ' ' . $e->getFile() . ' Line : ( ' . $e->getLine() . ' )';
+            $this->logger->error($this->message);
+        }
     }
 
-    public function getRules()
+    public function processDeletableItems($listOfSqlParams, $tableTypeToDelete)
+    {
+        foreach ($listOfSqlParams as $oneSqlParam => $oneDeleteStatement)
+            {
+                $requestCounter = 0;
+                while ($requestCounter < $this->limitOfRequestExecution) {
+                    $requestCounter++;
+                    $itemIds = $this->findItemsToDelete($oneSqlParam);
+                    if(empty($itemIds)) {
+                        if($tableTypeToDelete === 'document')
+                        {
+                            $this->noDocumentsTablesToEmptyCounter++;
+                            break;
+                        }
+                        else {
+                            $this->noRulesTablesToEmptyCounter++;
+                            break;
+                        }
+                    }
+                    $cleanItemIds = $this->cleanItemIds($itemIds);
+                    $this->deleteSelectedItems($cleanItemIds, $oneDeleteStatement);
+                }
+            }
+    }
+
+    public function getListOfSqlDocumentParams(): array
+    {
+        $listOfSqlDocumentParams = [
+            "SELECT log.id
+        FROM log
+        LEFT OUTER JOIN document ON log.doc_id = document.id
+        WHERE document.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM log WHERE id IN (%s)",
+
+        "SELECT documentdata.id
+        FROM documentdata
+        LEFT OUTER JOIN document ON documentdata.doc_id = document.id
+        WHERE document.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM documentdata WHERE id IN (%s)",
+
+        "SELECT documentaudit.id
+        FROM documentaudit
+        LEFT OUTER JOIN document ON documentaudit.doc_id = document.id
+        WHERE document.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM documentaudit WHERE id IN (%s)",
+
+        "SELECT documentrelationship.id
+        FROM documentrelationship
+        LEFT OUTER JOIN document ON documentrelationship.doc_id = document.id
+        WHERE document.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM documentrelationship WHERE id IN (%s)",
+        ];
+
+        return $listOfSqlDocumentParams;
+    }
+
+    public function documentSqlParams()
+    {
+        $listOfSqlDocumentParams = [
+            "SELECT document.id
+        FROM document
+        WHERE document.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM document WHERE id IN (%s)",
+        ];
+        return $listOfSqlDocumentParams;
+    }
+
+    public function getListOfSqlRuleParams()
+    {
+        $listOfSqlRuleParams = [
+        "SELECT ruleaudit.id
+        FROM ruleaudit
+        LEFT OUTER JOIN rule ON ruleaudit.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM ruleaudit WHERE id IN (%s)",
+
+        "SELECT rulefield.id
+        FROM rulefield
+        LEFT OUTER JOIN rule ON rulefield.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM rulefield WHERE id IN (%s)",
+
+        "SELECT rulefilter.id
+        FROM rulefilter
+        LEFT OUTER JOIN rule ON rulefilter.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM rulefilter WHERE id IN (%s)",
+
+        "SELECT ruleorder.rule_id
+        FROM ruleorder
+        LEFT OUTER JOIN rule ON ruleorder.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM ruleorder WHERE rule_id IN (%s)",
+
+        "SELECT rulerelationship.id
+        FROM rulerelationship
+        LEFT OUTER JOIN rule ON rulerelationship.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM rulerelationship WHERE id IN (%s)",
+
+        "SELECT ruleparamaudit.id
+        FROM ruleparamaudit
+        LEFT OUTER JOIN ruleparam ON ruleparamaudit.rule_param_id = ruleparam.id
+            LEFT OUTER JOIN rule ON ruleparam.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM ruleparamaudit WHERE id IN (%s)",
+
+        "SELECT ruleparam.id
+        FROM ruleparam
+        LEFT OUTER JOIN rule ON ruleparam.rule_id = rule.id
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM ruleparam WHERE id IN (%s)",
+        ];
+
+        return $listOfSqlRuleParams;
+    }
+
+    public function ruleSqlParams()
+    {
+        $listOfSqlRuleParams = [
+        "SELECT rule.id
+        FROM rule
+        WHERE rule.deleted = 1
+        LIMIT :limitOfDeletePerRequest" => "DELETE FROM rule WHERE id IN (%s)"
+        ];
+
+        return $listOfSqlRuleParams;
+    }
+    
+    public function findItemsToDelete($oneSqlParam): array
+    {
+            $stmt = $this->connection->prepare($oneSqlParam);
+            $stmt->bindValue(':limitOfDeletePerRequest', (int) trim($this->limitOfDeletePerRequest), PDO::PARAM_INT);
+            $result = $stmt->executeQuery();
+            $itemIds= [];
+            $itemIds = $result->fetchAllAssociative();
+        return $itemIds;
+    }
+
+    public function cleanItemIds($itemIds)
+    {
+        $cleanItemIds = [];
+        foreach ($itemIds as $oneIdKey => $oneIdValue) {
+            foreach ($oneIdValue as $oneInnerKey => $oneInnerValue) {
+                    $cleanItemIds[] = $oneInnerValue;
+            }
+        }
+        return $cleanItemIds;
+    }
+
+    public function deleteSelectedItems(array $itemIds, string $oneDeleteStatement)
+    {
+        try {
+            $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+            $sqlParams = sprintf($oneDeleteStatement, $placeholders);
+            $stmt = $this->connection->prepare($sqlParams);
+            $stmt->execute($itemIds);
+        } catch (Exception $e) {
+            $this->message .= 'Error  : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($this->message);
+        }
+    }
+
+    public function getRules($force = false)
     {
         try {
             $sqlParams = '	SELECT name_slug 
@@ -572,8 +790,8 @@ class jobcore
 								INNER JOIN rule
 									ON rule.id = ruleorder.rule_id
 							WHERE 
-									rule.active = 1
-								AND	rule.deleted = 0
+									rule.deleted = 0
+								'.(!$force ? ' AND rule.active = 1 ' : '').'
 							ORDER BY ruleorder.order ASC';
             $stmt = $this->connection->prepare($sqlParams);
             $result = $stmt->executeQuery();
@@ -707,7 +925,7 @@ class jobcore
                 }
                 // Ecriture du fichier
                 $yaml = Yaml::dump($templateArray, 4);
-                file_put_contents($this->parameterBagInterface->get('kernel.root_dir').'/Templates/'.$nomTemplate.'.yml', $yaml);
+                file_put_contents($this->parameterBagInterface->get('kernel.project_dir').'/src/Templates/'.$nomTemplate.'.yml', $yaml);
             }
         } catch (Exception $e) {
             $this->message .= 'Error : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
@@ -744,19 +962,20 @@ class jobcore
         $this->message = $upgrade->processUpgrade($output);
     }
 
-    // Permet de supprimer toutes les données des tabe source, target et history en fonction des paramètre de chaque règle
-
     /**
+     * Permet de supprimer toutes les données des tabe source, target et history en fonction des paramètre de chaque règle.
+     *
      * @throws \Doctrine\DBAL\Exception
      * @throws Exception
      */
     public function clearData()
-    {
+    { 	
         // Récupération de chaque règle et du paramètre de temps de suppression
         $sqlParams = "	SELECT 
 							rule.id,
 							rule.name,
-							ruleparam.value days
+							ruleparam.value days,
+							deleted
 						FROM rule
 							INNER JOIN ruleparam
 								ON rule.id = ruleparam.rule_id
@@ -765,17 +984,21 @@ class jobcore
         $stmt = $this->connection->prepare($sqlParams);
         $result = $stmt->executeQuery();
         $rules = $result->fetchAllAssociative();
+		// Calculate the limit for selection
+		$limit = $this->nbCallMaxDelete * $this->limitDelete;
         if (!empty($rules)) {
             // Boucle sur toutes les règles
             foreach ($rules as $rule) {
+				echo date('Y-m-d H:i:s').' - Rule '.$rule['name'].chr(10);
                 // Calculate the date corresponding depending the rule parameters
                 $limitDate = new DateTime('now', new DateTimeZone('GMT'));
                 $limitDate->modify('-'.$rule['days'].' days');
-                // Delete document data
-                $this->connection->beginTransaction();
-                try {
-                    $deleteSource = "
-						DELETE documentdata
+				
+				// Delete document data
+                // Select the list of documentdata to be deleted
+				try {
+					$deleteSourceSelection = "
+						SELECT documentdata.doc_id
 						FROM document
 							INNER JOIN documentdata
 								ON document.id = documentdata.doc_id
@@ -783,55 +1006,156 @@ class jobcore
 								document.rule_id = :ruleId
 							AND document.global_status IN ('Close','Cancel')
 							AND document.deleted = 0 
-							AND document.date_modified < :limitDate	";
-                    $stmt = $this->connection->prepare($deleteSource);
-                    $stmt->bindValue('ruleId', $rule['id']);
-                    $stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
-                    $result = $stmt->executeQuery();
-                    if ($result->rowCount() > 0) {
-                        $this->message .= $result->rowCount().' rows deleted in the table DocumentData for the rule '.$rule['name'].'. ';
-                    }
-                    $this->connection->commit(); // -- COMMIT TRANSACTION
+							AND document.date_modified < :limitDate
+						LIMIT ".$limit;
+					// Get selection
+					$stmt = $this->connection->prepare($deleteSourceSelection);
+					$stmt->bindValue('ruleId', $rule['id']);
+					$stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
+					$resultDeleteSourceSelection = $stmt->executeQuery();
+					$documentIds = $resultDeleteSourceSelection->fetchAllAssociative();
+					// $this->connection->commit(); // -- COMMIT TRANSACTION
+				} catch (Exception $e) {
+                    // $this->connection->rollBack(); // -- ROLLBACK TRANSACTION
+                    $this->message .= 'Failed to select the records in table DocumentData: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+                    $this->logger->error($this->message);
+                }
+				
+                try {
+					$count = 0;
+					$nbCall = 0;
+					// Delete data using pack size of $this->limitDelete rows
+					// Continue while we have results and if the program dosn't reach the limit call
+					while (
+							!empty($documentIds)
+						AND $nbCall < $this->nbCallMaxDelete
+					){
+						$i = 0;
+						$nbCall++;
+						
+						// Prepare delete query
+						if (!empty($documentIds)) {
+							$idString = '';
+							// Build IN parameter
+							foreach ($documentIds as $key => $documentId) {
+								if ($i >= $this->limitDelete) {
+									break;
+								}
+								$i++;
+								$idString .= "'".$documentId['doc_id']."',";
+								unset($documentIds[$key]);
+							}
+							$idString = rtrim($idString, ',');
+							if (!empty($idString)) {
+								$this->connection->beginTransaction();
+								// Delete rows in table documentdata
+								$deleteDocumentData = "DELETE FROM documentdata WHERE doc_id IN (".$idString.")";
+								$stmtDelete = $this->connection->prepare($deleteDocumentData);
+								$result = $stmtDelete->executeQuery();
+								// Save the number of rows deleted
+								if ($result->rowCount() > 0) {
+									$count += $result->rowCount();
+								}
+								$this->connection->commit(); // -- COMMIT TRANSACTION
+							}
+						}
+					}
                 } catch (Exception $e) {
                     $this->connection->rollBack(); // -- ROLLBACK TRANSACTION
                     $this->message .= 'Failed to clear the table DocumentData: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
                     $this->logger->error($this->message);
                 }
+				// Add log 
+				if ($count > 0) {
+					echo date('Y-m-d H:i:s').' - '.$count.' rows deleted in the table DocumentData for the rule '.$rule['name'].'. '.chr(10);
+					$this->message .= $count.' rows deleted in the table DocumentData for the rule '.$rule['name'].'. ';
+				}
 
-                // Delete log for these rule
-                $this->connection->beginTransaction();
-                try {
-                    $deleteLog = "
-						DELETE log
+				// Delete log
+                // Select the list of log to be deleted
+				try {
+					$deleteLogSelection = "
+						SELECT log.id
 						FROM log
 							INNER JOIN document
 								ON log.doc_id = document.id
 						WHERE 
-								log.rule_id = :ruleId
+								document.rule_id = :ruleId
 							AND log.msg IN ('Status : Filter_OK','Status : Predecessor_OK','Status : Relate_OK','Status : Transformed','Status : Ready_to_send')	
 							AND document.global_status IN ('Close','Cancel')
 							AND document.deleted = 0 
-							AND document.date_modified < :limitDate	";
-                    $stmt = $this->connection->prepare($deleteLog);
-                    $stmt->bindValue('ruleId', $rule['id']);
-                    $stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
-                    $result = $stmt->executeQuery();
-                    if ($result->rowCount() > 0) {
-                        $this->message .= $result->rowCount().' rows deleted in the table Log for the rule '.$rule['name'].'. ';
-                    }
-                    $this->connection->commit(); // -- COMMIT TRANSACTION
+							AND document.date_modified < :limitDate	
+						LIMIT ".$limit;
+					// Get selection
+					$stmt = $this->connection->prepare($deleteLogSelection);
+					$stmt->bindValue('ruleId', $rule['id']);
+					$stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
+					$resultDeleteLogSelection = $stmt->executeQuery();
+					$logIds = $resultDeleteLogSelection->fetchAllAssociative();
+				} catch (Exception $e) {
+                    $this->message .= 'Failed to select the records in table DocumentData: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+                    $this->logger->error($this->message);
+                }
+
+
+                try {
+					$count = 0;
+					$nbCall = 0;
+					// Delete data using pack size of $this->limitDelete rows
+					// Continue while we have results and if the program dosn't reach the limit call
+					while (
+							!empty($logIds)
+						AND $nbCall < $this->nbCallMaxDelete
+					){
+						$i = 0;
+						$nbCall++;
+						
+						// Prepare delete query
+						if (!empty($logIds)) {
+							$idString = '';
+							// Build IN parameter
+							foreach ($logIds as $key => $logId) {
+								if ($i >= $this->limitDelete) {
+									break;
+								}
+								$i++;
+								$idString .= "'".$logId['id']."',";
+								unset($logIds[$key]);
+							}
+							$idString = rtrim($idString, ',');
+							if (!empty($idString)) {
+								$this->connection->beginTransaction();
+								// Delete rows in table log
+								$deleteLog = "DELETE FROM log WHERE id IN (".$idString.")";
+								$stmtDeleteLog = $this->connection->prepare($deleteLog);
+								$result = $stmtDeleteLog->executeQuery();
+								// Save the number of rows deleted
+								if ($result->rowCount() > 0) {
+									$count += $result->rowCount();
+								}
+								$this->connection->commit(); // -- COMMIT TRANSACTION
+							}
+						}
+						
+					} 
                 } catch (Exception $e) {
                     $this->connection->rollBack(); // -- ROLLBACK TRANSACTION
                     $this->message .= 'Failed to clear the table Log: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
                     $this->logger->error($this->message);
                 }
+				// Add log 
+				if ($count > 0) {
+					echo date('Y-m-d H:i:s').' - '.$count.' rows deleted in the table Log for the rule '.$rule['name'].'. '.chr(10);
+					$this->message .= $count.' rows deleted in the table Log for the rule '.$rule['name'].'. ';
+				}	  
             }
         }
-        $this->connection->beginTransaction();
+		
+		// Delete job
         try {
             $limitDate = new DateTime('now', new DateTimeZone('GMT'));
             $limitDate->modify('-'.$this->nbDayClearJob.' days');
-            // Suppression des jobs de transfert vide
+            // Remove empty jobs
             $deleteJob = " 	
 				DELETE 
 				FROM job
@@ -844,23 +1168,38 @@ class jobcore
 					AND cancel = 0
 					AND error = 0
 					AND end < :limitDate
-			";
-            $stmt = $this->connection->prepare($deleteJob);
-            $stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
-            $result = $stmt->executeQuery();
-            if ($result->rowCount() > 0) {
-                $this->message .= $result->rowCount().' rows deleted in the table Job. ';
-            }
-            $this->connection->commit(); // -- COMMIT TRANSACTION
+					AND job.id NOT IN (select job_id from log) 
+				LIMIT ".$this->limitDelete;
+			$nbCall = 0;
+			$count = 0;
+			do {
+				$nbCall++;
+				$this->connection->beginTransaction();
+				$stmt = $this->connection->prepare($deleteJob);
+				$stmt->bindValue('limitDate', $limitDate->format('Y-m-d H:i:s'));
+				$resultDeleteJob = $stmt->executeQuery();
+				$this->connection->commit(); // -- COMMIT TRANSACTION
+				// Save the number of rows deleted
+				$count += $resultDeleteJob->rowCount();
+			} while (
+					$resultDeleteJob->rowCount() > 0
+				AND $nbCall < $this->nbCallMaxDelete
+			);
+			
+			// Add log 
+			if ($count > 0) {
+				$this->message .= $count.' rows deleted in the table Job. ';
+				echo date('Y-m-d H:i:s').' - '.$count.' rows deleted in the table Job. '.chr(10);
+			}
         } catch (Exception $e) {
             $this->connection->rollBack(); // -- ROLLBACK TRANSACTION
-            $this->message .= 'Failed to clear logs and the documents data: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
-            $this->logger->error($this->message);
+            $this->message .= 'Failed to clear job: '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($this->message);		
         }
     }
 
     // Récupération des données du job
-    public function getLogData($documentDetail = false)
+    public function getLogData()
     {
         try {
             // Récupération du nombre de document envoyé et en erreur pour ce job
@@ -924,7 +1263,7 @@ class jobcore
             }
 
             // Get the document detail if requested
-            if ($documentDetail) {
+            if (isset($documentDetail) && $documentDetail) {
                 $sqlParamsDoc = '	SELECT DISTINCT document.*
 								FROM log
 									INNER JOIN document
@@ -1027,6 +1366,40 @@ class jobcore
             return false;
         }
 
+        return true;
+    }
+
+    //check if the job is too long
+    public function checkJob($period)
+    {
+        try {
+            if (empty($period)) {
+                $period = $this->checkJobPeriod;
+            }
+            //Search only jobs with status start
+            $sqlParams = "SELECT DISTINCT job.id
+            FROM job 
+                INNER JOIN log    
+                    ON job.id = log.job_id
+            WHERE
+                    job.status = 'start'
+                AND TIMESTAMPDIFF(SECOND,  log.created, NOW()) > :period;";
+            $stmt = $this->connection->prepare($sqlParams);
+            $stmt->bindValue('period', $period);
+
+            $result = $stmt->executeQuery();
+            $jobs = $result->fetchAllAssociative();
+
+            foreach ($jobs as $job) {
+                //clone because, the job that is not the current job
+                $jobManagerChekJob = clone $this;
+                $jobManagerChekJob->setId($job['id']);
+                $jobManagerChekJob->closeJob();    
+            }
+        } catch (Exception $e) {
+            $this->logger->error('Error : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )');
+            return false;
+        }
         return true;
     }
 }

@@ -31,27 +31,30 @@ use Symfony\Component\Form\Extension\Core\Type\TextType;
 class sugarcrmcore extends solution
 {
     // Enable to read deletion and to delete data
-    protected $readDeletion = true;
-    protected $sendDeletion = true;
+    protected bool $readDeletion = true;
+    protected bool $sendDeletion = true;
 
     protected $sugarAPI;
-    protected $sugarAPIVersion = 'v11';
-    protected $sugarPlatform = 'base';
-    protected $defaultLimit = 100;
-    protected $bulkLimit = 250;
-    protected $delaySearch = '-1 month';
+    protected string $sugarAPIVersion = 'v11';
+    protected string $sugarPlatform = 'base';
+    protected int $defaultLimit = 100;
+    protected int $bulkLimit = 250;
+    protected string $delaySearch = '-1 month';
 
-    protected $required_fields = ['default' => ['id', 'date_modified']];
+    protected array $required_fields = ['default' => ['id', 'date_modified']];
 
-    protected $FieldsDuplicate = ['Contacts' => ['email1', 'last_name'],
+    protected array $FieldsDuplicate = 
+	[
+        'default' => ['name'],
+		'Contacts' => ['email1', 'last_name'],
         'Accounts' => ['email1', 'name'],
         'Users' => ['email1', 'last_name'],
         'Leads' => ['email1', 'last_name'],
         'Prospects' => ['email1', 'name'],
-        'default' => ['name'],
+        'EmailAddresses' => ['email_address'],
     ];
-
-    public function getFieldsLogin()
+	
+    public function getFieldsLogin(): array
     {
         return [
             [
@@ -146,7 +149,11 @@ class sugarcrmcore extends solution
     }
 
     // Check if the module is a relationship and return the relationship parameters
-    protected function isManyToManyRel($module)
+
+    /**
+     * @throws \Exception
+     */
+    protected function isManyToManyRel($module): bool
     {
         if (
                 !empty($module)
@@ -162,7 +169,7 @@ class sugarcrmcore extends solution
         return false;
     }
 
-    public function get_module_fields($module, $type = 'source', $param = null)
+    public function get_module_fields($module, $type = 'source', $param = null): array
     {
         parent::get_module_fields($module, $type);
         try {
@@ -260,22 +267,18 @@ class sugarcrmcore extends solution
 
             return $this->moduleFields;
         } catch (\Exception $e) {
-            $this->logger->error('Error : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )');
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
 
-            return false;
+            return ['error' => $error];
         }
     }
 
-    // get_module_fields($module)
+    // public function readData($param)
 
     /**
-     * Function read data.
-     *
-     * @param $param
-     *
-     * @return mixed
+     * @throws \Exception
      */
-    // public function readData($param)
     public function read($param)
     {
         $result = [];
@@ -286,12 +289,14 @@ class sugarcrmcore extends solution
             $deleted = true;
             $param['fields'][] = 'deleted';
         }
+		// Flag to know if Myddleware has read only deleted records
+		$onlyDeletion = true;
 
         // Init search parameters
         $filterArgs = [
             'max_num' => $param['limit'],
             'offset' => 0,
-            'fields' => implode($param['fields'], ','),
+            'fields' => implode(',',$param['fields']),
             'order_by' => 'date_modified',
             'deleted' => $deleted,
         ];
@@ -336,7 +341,11 @@ class sugarcrmcore extends solution
                     and !empty($record->deleted)
                 ) {
                     $result[$record->id]['myddleware_deletion'] = true;
-                }
+                } else {
+					// At least one non deleted record read
+					$onlyDeletion = false;
+				}
+				
                 foreach ($param['fields'] as $field) {
                     // Sugar returns multilist value as array
                     if (
@@ -352,13 +361,23 @@ class sugarcrmcore extends solution
                     }
                     $result[$record->id][$field] = (!empty($record->$field) ? $record->$field : '');
                 }
-                // No data returned if record deleted, we set a default date
+                // No date modified returned if record deleted, we set a default date (the last reference date read)
                 if (!empty($result[$record->id]['myddleware_deletion'])) {
-                    $result[$record->id]['date_modified'] = gmdate('Y-m-d H:i:s');
-                }
+                    $result[$record->id]['date_modified'] = end($records)->date_modified;
+                }	
             }
-        }
 
+			// Error if only deletion records read
+			if ($onlyDeletion) {
+				if (count($result) >= $param['limit']) {
+					throw new \Exception('Only deletion records read. It is not possible to determine the reference date with only deletion. Please increase the rule limit to include non deletion records.');
+				} else {
+					// If only deletion without new or modified record, we send no result. We wait for new or modified record. 
+					// Otherwise we will read the deleted record until a new or modified record is read because Sugar doesn't return modified date for deleted record.
+					return array();
+				}
+			}
+        }
         return $result;
     }
 
@@ -367,21 +386,12 @@ class sugarcrmcore extends solution
         return $filterArgs;
     }
 
-    public function getRefFieldName($moduleSource, $RuleMode)
+    public function getRefFieldName($param): string
     {
         return 'date_modified';
     }
 
-    // end function read
-
-    /**
-     * Function create data.
-     *
-     * @param $param
-     *
-     * @return mixed
-     */
-    public function createData($param)
+    public function createData($param): array
     {
         $result = [];
         $error = '';
@@ -405,16 +415,7 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function create
-
-    /**
-     * Function update data.
-     *
-     * @param $param
-     *
-     * @return mixed
-     */
-    public function updateData($param)
+    public function updateData($param): array
     {
         $result = [];
         $error = '';
@@ -438,16 +439,7 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function update
-
-    /**
-     * Function delete data.
-     *
-     * @param $param
-     *
-     * @return mixed
-     */
-    public function deleteData($param)
+    public function deleteData($param): array
     {
         $result = [];
         $error = '';
@@ -471,9 +463,7 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function update
-
-    public function upsert($method, $param)
+    public function upsert($method, $param): array
     {
         try {
             $i = 0;
@@ -578,10 +568,11 @@ class sugarcrmcore extends solution
         return $result;
     }
 
-    // end function create
-
     // Convert date to Myddleware format
     // 2020-07-08T12:33:06+02:00 to 2020-07-08 10:33:06
+    /**
+     * @throws \Exception
+     */
     protected function dateTimeToMyddleware($dateTime)
     {
         $dto = new \DateTime($dateTime);
@@ -591,9 +582,10 @@ class sugarcrmcore extends solution
         return $dto->format('Y-m-d H:i:s');
     }
 
-    // dateTimeToMyddleware($dateTime)
-
     // Convert date to SugarCRM format
+    /**
+     * @throws \Exception
+     */
     protected function dateTimeFromMyddleware($dateTime)
     {
         $dto = new \DateTime($dateTime);
@@ -601,10 +593,8 @@ class sugarcrmcore extends solution
         return $dto->format('Y-m-d\TH:i:s+00:00');
     }
 
-    // dateTimeToMyddleware($dateTime)
-
     // Build the direct link to the record (used in data transfer view)
-    public function getDirectLink($rule, $document, $type)
+    public function getDirectLink($rule, $document, $type): string
     {
         // Get url, module and record ID depending on the type
         if ('source' == $type) {
@@ -620,7 +610,9 @@ class sugarcrmcore extends solution
         return rtrim($url, '/').'/#'.$module.'/'.$recordId;
     }
 
-    // Used only for metadata (get_modules and )
+    /**
+     * @throws \Exception
+     */
     protected function customCall($url, $parameters = null, $method = null)
     {
         try {
@@ -650,7 +642,10 @@ class sugarcrmcore extends solution
             //decode response
             $response_obj = json_decode($response);
         } catch (Exception $e) {
-            throw new \Exception($e->getMessage());
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+
+            return ['error' => $error];
         }
         // Send exception catched into functions
         if (!empty($response_obj->error_message)) {

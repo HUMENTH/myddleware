@@ -27,19 +27,16 @@ namespace App\Entity;
 
 use DateTime;
 use Doctrine\ORM\Mapping as ORM;
-use Serializable;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Validator\Constraints as Assert;
 
 /**
- * User.
- *
  * @ORM\Table(name="users")
  * @ORM\Entity(repositoryClass="App\Repository\UserRepository")
  * @UniqueEntity(fields={"username"}, message="There is already an account with this username")
  */
-class User implements UserInterface, Serializable
+class User implements UserInterface
 {
     const ROLE_DEFAULT = 'ROLE_USER';
     const ROLE_SUPER_ADMIN = 'ROLE_SUPER_ADMIN';
@@ -50,77 +47,64 @@ class User implements UserInterface, Serializable
      * @ORM\Column(type="integer")
      * @ORM\GeneratedValue(strategy="AUTO")
      */
-    protected $id;
+    protected int $id;
 
     /**
-     * @var string
      * @ORM\Column(name="username", type="string", length=180)
      */
-    protected $username;
+    protected string $username;
 
     /**
-     * @var string
      * @ORM\Column(name="username_canonical", type="string", length=180, unique=true)
      */
-    protected $usernameCanonical;
+    protected ?string $usernameCanonical;
 
     /**
-     * @var string
      * @ORM\Column(name="email", type="string", length=180)
      */
-    protected $email;
+    protected string $email;
 
     /**
-     * @var string
      * @ORM\Column(name="email_canonical", type="string", length=180, unique=true)
      */
-    protected $emailCanonical;
+    protected ?string $emailCanonical;
 
     /**
-     * @var bool
      * @ORM\Column(name="enabled", type="boolean")
      */
-    protected $enabled;
+    protected bool $enabled;
 
     /**
-     * @var string
      * @ORM\Column(name="salt", type="string", nullable=true)
      */
     protected $salt;
 
     /**
-     * @var string
      * @ORM\Column(name="password", type="string")
      */
-    protected $password;
+    protected string $password;
 
     /**
      * Plain password. Used for model validation. Must not be persisted.
-     *
-     * @var string
      */
-    protected $plainPassword;
+    protected ?string $plainPassword;
 
     /**
-     * @var DateTime
      * @ORM\Column(name="last_login", type="datetime", nullable=true)
      */
-    protected $lastLogin;
+    protected ?DateTime $lastLogin;
 
     /**
-     * @var string
      * @ORM\Column(name="confirmation_token", type="string", length=180, unique=true, nullable=true)
      */
-    protected $confirmationToken;
+    protected ?string $confirmationToken;
 
     /**
-     * @var DateTime
      * @ORM\Column(name="password_requested_at", type="datetime", nullable=true)
      */
-    protected $passwordRequestedAt;
+    protected ?DateTime $passwordRequestedAt;
 
     /**
-     * @var array
      * @ORM\Column(name="roles", type="array")
      */
     protected $roles;
@@ -129,11 +113,8 @@ class User implements UserInterface, Serializable
      * @Assert\Timezone
      * @ORM\Column(name="timezone", type="string")
      */
-    protected $timezone;
+    protected string $timezone;
 
-    /**
-     * User constructor.
-     */
     public function __construct()
     {
         $this->enabled = false;
@@ -142,23 +123,15 @@ class User implements UserInterface, Serializable
 
     public function isAdmin(): bool
     {
-        return $this->hasRole('ROLE_ADMIN');
+        return $this->hasRole('ROLE_ADMIN') || $this->hasRole('ROLE_SUPER_ADMIN');
     }
 
-    /**
-     * Get id.
-     *
-     * @return int
-     */
-    public function getId()
+    public function getId(): int
     {
         return $this->id;
     }
 
-    /**
-     * {@inheritdoc}
-     */
-    public function addRole($role)
+    public function addRole($role): self
     {
         $role = strtoupper($role);
         if ($role === static::ROLE_DEFAULT) {
@@ -175,7 +148,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function serialize()
+    public function serialize(): ?string
     {
         return serialize([
             $this->password,
@@ -231,7 +204,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getUsername()
+    public function getUsername(): string
     {
         return $this->username;
     }
@@ -239,7 +212,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getUsernameCanonical()
+    public function getUsernameCanonical(): ?string
     {
         return $this->usernameCanonical;
     }
@@ -255,7 +228,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getEmail()
+    public function getEmail(): string
     {
         return $this->email;
     }
@@ -263,7 +236,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getEmailCanonical()
+    public function getEmailCanonical(): string
     {
         return $this->emailCanonical;
     }
@@ -271,7 +244,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getPassword()
+    public function getPassword(): ?string
     {
         return $this->password;
     }
@@ -279,17 +252,12 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getPlainPassword()
+    public function getPlainPassword(): string
     {
         return $this->plainPassword;
     }
 
-    /**
-     * Gets the last login time.
-     *
-     * @return DateTime
-     */
-    public function getLastLogin()
+    public function getLastLogin(): ?DateTime
     {
         return $this->lastLogin;
     }
@@ -297,7 +265,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getConfirmationToken()
+    public function getConfirmationToken(): ?string
     {
         return $this->confirmationToken;
     }
@@ -305,7 +273,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getRoles()
+    public function getRoles(): array
     {
         $roles = $this->roles;
 
@@ -318,7 +286,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function getTimezone()
+    public function getTimezone(): string
     {
         return $this->timezone;
     }
@@ -326,7 +294,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function hasRole($role)
+    public function hasRole($role): bool
     {
         return in_array(strtoupper($role), $this->getRoles(), true);
     }
@@ -334,7 +302,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function isAccountNonExpired()
+    public function isAccountNonExpired(): bool
     {
         return true;
     }
@@ -342,7 +310,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function isAccountNonLocked()
+    public function isAccountNonLocked(): bool
     {
         return true;
     }
@@ -350,12 +318,12 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function isCredentialsNonExpired()
+    public function isCredentialsNonExpired(): bool
     {
         return true;
     }
 
-    public function isEnabled()
+    public function isEnabled(): bool
     {
         return $this->enabled;
     }
@@ -363,7 +331,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function isSuperAdmin()
+    public function isSuperAdmin(): bool
     {
         return $this->hasRole(static::ROLE_SUPER_ADMIN);
     }
@@ -371,7 +339,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function removeRole($role)
+    public function removeRole($role): self
     {
         if (false !== $key = array_search(strtoupper($role), $this->roles, true)) {
             unset($this->roles[$key]);
@@ -384,7 +352,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setUsername($username)
+    public function setUsername($username): self
     {
         $this->username = $username;
 
@@ -394,7 +362,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setUsernameCanonical($usernameCanonical)
+    public function setUsernameCanonical($usernameCanonical): self
     {
         $this->usernameCanonical = $usernameCanonical;
 
@@ -404,7 +372,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setSalt($salt)
+    public function setSalt($salt): self
     {
         $this->salt = $salt;
 
@@ -414,7 +382,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setEmail($email)
+    public function setEmail($email): self
     {
         $this->email = $email;
 
@@ -424,7 +392,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setEmailCanonical($emailCanonical)
+    public function setEmailCanonical($emailCanonical): self
     {
         $this->emailCanonical = $emailCanonical;
 
@@ -434,7 +402,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setEnabled($boolean)
+    public function setEnabled($boolean): self
     {
         $this->enabled = (bool) $boolean;
 
@@ -444,7 +412,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setPassword($password)
+    public function setPassword($password): self
     {
         $this->password = $password;
 
@@ -454,7 +422,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setSuperAdmin($boolean)
+    public function setSuperAdmin($boolean): self
     {
         if (true === $boolean) {
             $this->addRole(static::ROLE_SUPER_ADMIN);
@@ -468,7 +436,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setPlainPassword($password)
+    public function setPlainPassword($password): self
     {
         $this->plainPassword = $password;
 
@@ -478,7 +446,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setLastLogin(DateTime $time = null)
+    public function setLastLogin(?DateTime $time = null): self
     {
         $this->lastLogin = $time;
 
@@ -488,7 +456,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setConfirmationToken($confirmationToken)
+    public function setConfirmationToken($confirmationToken): self
     {
         $this->confirmationToken = $confirmationToken;
 
@@ -498,7 +466,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setPasswordRequestedAt(DateTime $date = null)
+    public function setPasswordRequestedAt(?DateTime $date = null): self
     {
         $this->passwordRequestedAt = $date;
 
@@ -507,10 +475,8 @@ class User implements UserInterface, Serializable
 
     /**
      * Gets the timestamp that the user requested a password reset.
-     *
-     * @return DateTime|null
      */
-    public function getPasswordRequestedAt()
+    public function getPasswordRequestedAt(): ?DateTime
     {
         return $this->passwordRequestedAt;
     }
@@ -518,7 +484,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function isPasswordRequestNonExpired($ttl)
+    public function isPasswordRequestNonExpired($ttl): bool
     {
         return $this->getPasswordRequestedAt() instanceof DateTime &&
             $this->getPasswordRequestedAt()->getTimestamp() + $ttl > time();
@@ -527,7 +493,7 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setRoles(array $roles)
+    public function setRoles(array $roles): self
     {
         $this->roles = [];
 
@@ -541,17 +507,14 @@ class User implements UserInterface, Serializable
     /**
      * {@inheritdoc}
      */
-    public function setTimezone(string $timezone = 'UTC')
+    public function setTimezone(string $timezone = 'UTC'): self
     {
         $this->timezone = $timezone;
 
         return $this;
     }
 
-    /**
-     * @return string
-     */
-    public function __toString()
+    public function __toString(): string
     {
         return (string) $this->getUsername();
     }

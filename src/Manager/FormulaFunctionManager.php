@@ -25,21 +25,17 @@
 
 namespace App\Manager;
 
-/**
- * Class formulafunctioncore.
- */
 class formulafunctioncore
 {
-    protected $names = ['changeTimeZone', 'changeFormatDate', 'changeValue', 'changeMultiValue', 'getValueFromArray'];
+    protected array $names = ['changeTimeZone', 'changeFormatDate', 'changeValue', 'changeMultiValue', 'getValueFromArray'];
+    protected string $path = "App\Manager\FormulaFunctionManager::";
 
-    protected $path = "App\Manager\FormulaFunctionManager::";
-
-    public function getNamesFunctions()
+    public function getNamesFunctions(): array
     {
         return $this->names;
     }
 
-    public function getPathFunctions()
+    public function getPathFunctions(): array
     {
         // Concaténation avant envoi du chemin avec le nom
         $return = [];
@@ -85,11 +81,11 @@ class formulafunctioncore
     public static function changeValue($var, $arrayKeyToValue, $acceptNull = null)
     {
         // Transform string into an array
-        $arrayKeyToValue = json_decode(str_replace(['(', ')', '\''], ['{', '}', '"'], $arrayKeyToValue), true);
+		// Change first and last characters (parentheses) by accolades
+		// Replace ' before and after , and : by " (manage space before , and :)
+        $arrayKeyToValue = json_decode('{"'.str_replace([ ':\'', '\':',  ': \'', '\' :', ',\'', '\',', ', \'', '\' ,'], [ ':"', '":', ':"', '":', ',"', '",', ',"', '",'], substr($arrayKeyToValue,2,-2)).'"}', true);
         if (in_array($var, array_keys($arrayKeyToValue))) {
-            $var = $arrayKeyToValue[$var];
-
-            return $var;
+            return $arrayKeyToValue[$var];
         }
         if (!empty($acceptNull)) {
             return '';
@@ -98,11 +94,13 @@ class formulafunctioncore
 
     public static function changeMultiValue($var, $arrayKeyToValue, $delimiter)
     {
-        // Transform $var into array
+        // Transform string into an array
+		// Change first and last characters (parentheses) by accolades
+		// Replace ' before and after , and : by " (manage space before , and :)
         $return = '';
         $arrayVar = explode($delimiter, $var);
         if (!empty($arrayVar)) {
-            $arrayKeyToValue = json_decode(str_replace(['(', ')', '\''], ['{', '}', '"'], $arrayKeyToValue), true);
+            $arrayKeyToValue = json_decode('{"'.str_replace([ ':\'', '\':',  ': \'', '\' :', ',\'', '\',', ', \'', '\' ,'], [ ':"', '":', ':"', '":', ',"', '",', ',"', '",'], substr($arrayKeyToValue,2,-2)).'"}', true);
             foreach ($arrayVar as $varValue) {
                 // Transform string into an array
                 if (!empty($arrayKeyToValue[$varValue])) {
@@ -110,9 +108,8 @@ class formulafunctioncore
                     $return .= $arrayKeyToValue[$varValue].$delimiter;
                 }
             }
-            $return = rtrim($return, $delimiter);
 
-            return $return;
+            return rtrim($return, $delimiter);
         }
     }
 

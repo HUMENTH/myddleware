@@ -353,7 +353,7 @@ $(function () {
 					relations: recup_relation()
 				},
 				beforeSend: function () {
-					$('#simulation_tab').html('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg> ' + data_wait);
+					$('#simulation_tab').html('<i class="fa fa-info-circle" aria-hidden="true"></i>' + data_wait);
 				},
 				success: function (data) {
 
@@ -390,7 +390,7 @@ $(function () {
 						query: select_record_id.value
 					},
 					beforeSend: function () {
-						$('#simulation_tab').html('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg> ' + data_wait);
+						$('#simulation_tab').html('<i class="fa fa-info-circle" aria-hidden="true"></i>' + data_wait);
 
 					},
 					success: function (data) {
@@ -498,8 +498,9 @@ $(function () {
 					}
 				}, // rev 1.08
 				statusCode: {
-					500: function () {
-						alert('Service is temporarily unavailable');
+					500: function (e) {
+						console.log(e.responseText);
+						alert('An error occured. Please check your server logs for more detailed information.');
 						$("#validation").attr('value', before); // rev 1.08
 					}
 				}
@@ -669,29 +670,38 @@ $(function () {
 		}
 	});
 
+// If I double click on the element li inside the element (an ul) with the id flux_target
+$("#flux_target").on("dblclick", 'li', function () {
 	
-
-	$("#flux_target").on("dblclick", 'li', function () {
-
+		// If the attribute data-gbl (for global) is error or open
 		if ($('#gblstatus').attr('data-gbl') == 'error' || $('#gblstatus').attr('data-gbl') == 'open') {
+			// Retrieves the class of the element we clicked on
 			verif = $(this).attr('class');
+			// Finds the class of the first li element within #flux_target
 			first = $('li:first', '#flux_target').attr('class');
 			classe = $(this).attr('class');
 
+			// If the type of the class attribute is not undefinde for the #flux_target element
+			// different if the class of the first element is undefined
+			// And if the class of the clicked element is not undefined
 			if (typeof verif !== "undefined" && first === "undefined" != classe !== "undefined") {
 
+				// save the text to a variable
 				value = $(this).find('.value').text();
+				// Removes the original value of the field
 				$(this).find('.value').remove();
-				$(this).append('<input id="' + classe + '" type="text" value="' + value + '" /><div data-value="' + classe + '" class="btn-group btn-group-xs"><span class="glyphicon glyphicon-ok cursor"></span><span class="load"></span></div>');
+				// Add a new field
+				newElement = $(this).append('<input id="' + classe + '" type="text" value="' + value + '" /><button type="submit" data-value="' + classe + '" class="btn-group btn-group-xs load"><i class="fa fa-check-circle"></i ></button> ');
+				$(this).append(newElement);
+				// add a save button
 			}
 		}
-
 	});
 
-	$("#flux_target").on("click", 'div', function () {
+	// If the div in flux_target is clicked, then wec call the saveInputFlux function
+	$("#flux_target").on("click", '.load', function () {
 		saveInputFlux($(this), inputs_flux);
 	});
-
 
 		// Rev 1.1.0 Upload Files ------------------------------
 	// Fermeture de la fancybox
@@ -813,7 +823,7 @@ function removeSpace(string) {
 /* infobulle mapping des champs */
 function fields_target_hover() {
 	$('.ch').on('hover', function () {
-			$(this).append($('<div class="info_delete_fields"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/></svg> ' + infobulle_fields + '</div>'));
+			$(this).append($('<i class="fa fa-info-circle" aria-hidden="true"></i> ' + infobulle_fields + '</div>'));
 		},
 		function () {
 			$(this).find("div:last").remove();
@@ -1261,7 +1271,7 @@ function theme(style_template) {
 		$('#area_color').css('color', '#444446');
 		$('#area_color .operateur').css('color', '#EC8709');
 		$('#area_color .chaine').css('color', '#268bd2');
-		$('#area_color .variable').css('color', '#9E9937');
+		$('#area_color .variable').css('color', '#198BCA');
 	}
 }
 
@@ -1695,6 +1705,7 @@ function massAddFlux(id, cond, massFluxTab) {
 }
 
 
+// Save the modified field data by using an ajax request
 function saveInputFlux(div, link) {
 
 	fields = div.attr('data-value');

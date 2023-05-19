@@ -46,7 +46,7 @@ class LoadSolutionData implements FixtureInterface
         ['name' => 'sapecc',			'active' => 0, 'source' => 1, 'target' => 0],
         ['name' => 'magento',			'active' => 1, 'source' => 1, 'target' => 1],
         ['name' => 'moodle',			'active' => 1, 'source' => 1, 'target' => 1],
-        ['name' => 'file',				'active' => 0, 'source' => 1, 'target' => 0],
+        ['name' => 'file',				'active' => 1, 'source' => 1, 'target' => 0],
         ['name' => 'microsoftsql',		'active' => 1, 'source' => 1, 'target' => 1],
         ['name' => 'ringcentral',		'active' => 0, 'source' => 1, 'target' => 0],
         ['name' => 'cirrusshield',		'active' => 0, 'source' => 1, 'target' => 1],
@@ -61,6 +61,7 @@ class LoadSolutionData implements FixtureInterface
         ['name' => 'postgresql',		'active' => 1, 'source' => 1, 'target' => 1],
         ['name' => 'airtable',			'active' => 1, 'source' => 1, 'target' => 1],
         ['name' => 'sendinblue',	    'active' => 1, 'source' => 1, 'target' => 1],
+        ['name' => 'yousign',           'active' => 1, 'source' => 1, 'target' => 1],
     ];
 
     public function load(ObjectManager $manager)

@@ -32,18 +32,18 @@ use Symfony\Component\Form\Extension\Core\Type\TextType; // SugarCRM Myddleware
 class filecore extends solution
 {
     protected $baseUrl;
-    protected $messages = [];
-    protected $duplicateDoc = [];
-    protected $connection;
-    protected $delimiter = ';';
-    protected $enclosure = '"';
-    protected $escape = '';
-    protected $removeChar = [' ', '/', '\'', '.', '(', ')'];
-    protected $readLimit = 1000;
-    protected $lineNumber = 0;
+    protected array $messages = [];
+    protected array $duplicateDoc = [];
+    protected $sshconnection;
+    protected string $delimiter = ';';
+    protected string $enclosure = '"';
+    protected string $escape = '';
+    protected array $removeChar = [' ', '/', '\'', '.', '(', ')'];
+    protected int $readLimit = 1000;
+    protected int $lineNumber = 0;
 
-    protected $required_fields = ['default' => ['id', 'date_modified']];
-    protected $columnWidth = [];
+    protected array $required_fields = ['default' => ['id', 'date_modified']];
+    protected array $columnWidth = [];
 
     private $driver;
     private $host;
@@ -52,7 +52,7 @@ class filecore extends solution
     private $login;
     private $password;
 
-    public function login($paramConnexion)
+    public function login($paramConnexion): void
     {
         parent::login($paramConnexion);
         try {
@@ -60,30 +60,26 @@ class filecore extends solution
                 throw new \Exception('Please enable extension ssh2. Help here : http://php.net/manual/fr/ssh2.installation.php');
             }
             // Connect to the server
-            $this->connection = ssh2_connect($this->paramConnexion['host'], $this->paramConnexion['port']);
-            ssh2_auth_password($this->connection, $this->paramConnexion['login'], $this->paramConnexion['password']);
+            $this->sshconnection = ssh2_connect($this->paramConnexion['host'], $this->paramConnexion['port']);
+            ssh2_auth_password($this->sshconnection, $this->paramConnexion['login'], $this->paramConnexion['password']);
 
             // Check if the directory exist
-            $stream = ssh2_exec($this->connection, 'cd '.$this->paramConnexion['directory'].';pwd');
+            $stream = ssh2_exec($this->sshconnection, 'cd '.$this->paramConnexion['directory'].';pwd');
             stream_set_blocking($stream, true);
             $output = stream_get_contents($stream);
-            if (trim($this->paramConnexion['directory']) != trim($output)) {
+            if (strpos(trim($output), trim($this->paramConnexion['directory'])) === false) {
                 throw new \Exception('Failed to access to the directory'.$this->paramConnexion['directory'].'. Could you check if this directory exists and if the user has the right to read it. ');
             }
 
             // If all check are OK so connexion is valid
             $this->connexion_valide = true;
         } catch (\Exception $e) {
-            $error = $e->getMessage();
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
             $this->logger->error($error);
-
-            return ['error' => $error];
         }
     }
 
-    // login($paramConnexion)
-
-    public function getFieldsLogin()
+    public function getFieldsLogin(): array
     {
         return [
             [
@@ -115,11 +111,11 @@ class filecore extends solution
     }
 
     // Renvoie les modules passés en paramètre
-    public function get_modules($type = 'source')
+    public function get_modules($type = 'source'): array
     {
         try {
             // Get the subfolders of the current directory
-            $stream = ssh2_exec($this->connection, 'cd '.$this->paramConnexion['directory'].';ls -d */');
+            $stream = ssh2_exec($this->sshconnection, 'cd '.$this->paramConnexion['directory'].';ls -d */');
             stream_set_blocking($stream, true);
             $output = stream_get_contents($stream);
             // Transform the directory list in an array
@@ -136,14 +132,14 @@ class filecore extends solution
 
             return $modules;
         } catch (\Exception $e) {
-            $error = $e->getMessage();
-
-            return $error;
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+            return ['error' => $error];
         }
     }
 
     // Renvoie les champs du module passé en paramètre
-    public function get_module_fields($module, $type = 'source', $param = null)
+    public function get_module_fields($module, $type = 'source', $param = null): array
     {
         parent::get_module_fields($module, $type);
         try {
@@ -152,7 +148,7 @@ class filecore extends solution
                 $file = $this->get_last_file($this->paramConnexion['directory'].'/'.$module, '1970-01-01 00:00:00');
                 $fileName = trim($this->paramConnexion['directory'].'/'.$module.$file);
                 // Open the file
-                $sftp = ssh2_sftp($this->connection);
+                $sftp = ssh2_sftp($this->sshconnection);
                 $stream = fopen('ssh2.sftp://'.intval($sftp).$fileName, 'r');
                 $headerString = trim(fgets($stream));
                 // Close the file
@@ -201,20 +197,17 @@ class filecore extends solution
 
             return $this->moduleFields;
         } catch (\Exception $e) {
-            $error = $e->getMessage();
-            echo 'Erreur : '.$error;
-
-            return false;
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+            return ['error' => $error];
         }
     }
-
-    // get_module_fields($module)
 
     // Get the fieldId from the other rules to add them into the source relationship list field
     public function get_module_fields_relate($module, $param)
     {
         // Get the rule list with the same connectors (both directions) to get the relate ones
-        $ruleListRelation = $this->getEntityManager->getRepository(Rule::class)->createQueryBuilder('r')
+        $ruleListRelation = $this->entityManager->getRepository(Rule::class)->createQueryBuilder('r')
                         ->select('r.id')
                         ->where('(
 											r.connectorSource= ?1 
@@ -297,9 +290,9 @@ class filecore extends solution
             }
 
             $fileName = $this->paramConnexion['directory'].'/'.$param['module'].$file;
-
+			
             // Open the file
-            $sftp = ssh2_sftp($this->connection);
+            $sftp = ssh2_sftp($this->sshconnection);
             $stream = fopen('ssh2.sftp://'.intval($sftp).$fileName, 'r');
             $header = $this->getFileHeader($stream, $param);
 
@@ -310,7 +303,7 @@ class filecore extends solution
             $allRuleField[] = $param['ruleParams']['fieldId'];
 
             // Get the date of modification of the file
-            $new_date_ref = ssh2_exec($this->connection, 'cd '.$this->paramConnexion['directory'].'/'.$param['module'].';stat -c %y '.$file);
+            $new_date_ref = ssh2_exec($this->sshconnection, 'cd '.$this->paramConnexion['directory'].'/'.$param['module'].';stat -c %y '.$file);
             stream_set_blocking($new_date_ref, true);
             $new_date_ref = stream_get_contents($new_date_ref);
             $new_date_ref = trim($new_date_ref);
@@ -440,12 +433,11 @@ class filecore extends solution
         if (!empty($stream)) {
             fclose($stream);
         }
-
         return $result;
     }
 
     // Transform the result
-    protected function generateReadResult($param, $count, $values, $new_date_ref)
+    protected function generateReadResult($param, $count, $values, $new_date_ref): array
     {
         return [
             'count' => $count,
@@ -462,7 +454,7 @@ class filecore extends solution
     }
 
     // Check if teh limit has been reached
-    protected function limitReached($param, $count)
+    protected function limitReached($param, $count): bool
     {
         if ($count >= $this->readLimit) {
             return true;
@@ -472,7 +464,7 @@ class filecore extends solution
     }
 
     // Convert the first line of the file to an array with all fields
-    protected function getFileHeader($stream, $param)
+    protected function getFileHeader($stream, $param): array
     {
         $headerString = trim(fgets($stream));
         $fields = $this->transformRow($headerString, $param);
@@ -491,7 +483,7 @@ class filecore extends solution
     }
 
     // Permet de renvoyer l'id de la table en récupérant la table liée à la règle ou en la créant si elle n'existe pas
-    public function getFieldsParamUpd($type, $module)
+    public function getFieldsParamUpd($type, $module): array
     {
         try {
             // $fieldsSource = array();
@@ -522,18 +514,18 @@ class filecore extends solution
     }
 
     // Generate ID for the document
-    protected function generateId($param, $rowFile)
+    protected function generateId($param, $rowFile): string
     {
         return uniqid('', true);
     }
 
-    protected function checkRow($rowFile, $param)
+    protected function checkRow($rowFile, $param): bool
     {
         return true;
     }
 
     // Transformm the buffer to and array of fields
-    protected function transformRow($buffer, $param)
+    protected function transformRow($buffer, $param): array
     {
         // If the module contains file with a fix column width (if attribute $columnWidth is set up for your module)
         // Then we manage row using the width of each column
@@ -553,24 +545,24 @@ class filecore extends solution
     }
 
     // Get the delimiter
-    protected function getDelimiter($param)
+    protected function getDelimiter($param): string
     {
         return $this->delimiter;
     }
 
     // Get the enclosure
-    protected function getEnclosure($param)
+    protected function getEnclosure($param): string
     {
         return $this->enclosure;
     }
 
     // Get the escape
-    protected function getEscape($param)
+    protected function getEscape($param): string
     {
         return $this->escape;
     }
 
-    protected function validateRow($row, $idRow, $rowNumber)
+    protected function validateRow($row, $idRow, $rowNumber): bool
     {
         // We do "++" because we don't take the "header" so the first line and we have a line to delete
         $rowNumber = $rowNumber + 2;
@@ -582,9 +574,9 @@ class filecore extends solution
         return true;
     }
 
-    protected function get_last_file($directory, $date_ref)
+    protected function get_last_file($directory, $date_ref): string
     {
-        $stream = ssh2_exec($this->connection, 'cd '.$directory.';find . -newermt "'.$date_ref.'" -type f | sort |  head -n 1');
+        $stream = ssh2_exec($this->sshconnection, 'cd '.$directory.';find . -newermt "'.$date_ref.'" -type f | sort |  head -n 1');
         stream_set_blocking($stream, true);
         $file = stream_get_contents($stream);
         $file = ltrim($file, './'); // The filename can have ./ at the beginning
@@ -593,7 +585,7 @@ class filecore extends solution
     }
 
     // Get the strings which can identify what field is an id in the table
-    protected function getIdFields($module, $type)
+    protected function getIdFields($module, $type): array
     {
         // default is id
         return ['id'];

@@ -25,56 +25,52 @@
 
 namespace App\Solutions;
 
+use DateTime;
+use Exception;
 use Symfony\Component\Form\Extension\Core\Type\PasswordType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\Exception\ClientExceptionInterface;
+use Symfony\Contracts\HttpClient\Exception\DecodingExceptionInterface;
+use Symfony\Contracts\HttpClient\Exception\RedirectionExceptionInterface;
+use Symfony\Contracts\HttpClient\Exception\ServerExceptionInterface;
+use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 
 class airtablecore extends solution
 {
-    protected $sendDeletion = true;
+    protected bool $sendDeletion = true;
 
-    protected $airtableURL = 'https://api.airtable.com/v0/';
-    protected $metadataApiEndpoint = 'https://api.airtable.com/v0/meta/bases/';
+    protected string $airtableURL = 'https://api.airtable.com/v0/';
+    protected string $metadataApiEndpoint = 'https://api.airtable.com/v0/meta/bases/';
 
-    protected $required_fields = ['default' => ['createdTime', 'Last Modified']];
     /**
      * Airtable base.
-     *
-     * @var string
      */
-    protected $projectID;
+    protected string $projectID;
     /**
      * API key (provided by Airtable).
-     *
-     * @var string
      */
-    protected $token;
-    protected $delaySearch = '-1 month';
+    protected string $token;
+    protected string $delaySearch = '-1 month';
     /**
      * Name of the table / module that will be used as the default table to access the login() method
      * This is initialised to 'Contacts' by default as I've assumed that would be the most common possible value.
      * However, this can of course be changed to any table value already present in your Airtable base.
-     *
-     * @var string
      */
-    protected $tableName;
+    protected array $tableName;
 
     /**
      * Can't be greater than 100.
-     *
-     * @var int
      */
-    protected $defaultLimit = 100;
+    protected int $defaultLimit = 100;
 
     /**
      * Max number of records posted by call.
-     *
-     * @var string
      */
-    protected $callPostLimit = 10;
+    protected int $callPostLimit = 10;
 
     //Log in form parameters
-    public function getFieldsLogin()
+    public function getFieldsLogin(): array
     {
         // QUESTION: could we possibly pass a MODULE here ?
         // This would allow us to then only resort to variable in login etc
@@ -95,10 +91,12 @@ class airtablecore extends solution
 
     /**
      * Request to attempt to log in to Airtable.
-     *
-     * @param array $paramConnexion
-     *
-     * @return void
+     * @param $paramConnexion
+     * @throws ClientExceptionInterface
+     * @throws DecodingExceptionInterface
+     * @throws RedirectionExceptionInterface
+     * @throws ServerExceptionInterface
+     * @throws TransportExceptionInterface
      */
     public function login($paramConnexion)
     {
@@ -117,11 +115,9 @@ class airtablecore extends solution
             if (!empty($content) && 200 === $statusCode) {
                 $this->connexion_valide = true;
             }
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $error = $e->getMessage().' '.$e->getFile().' '.$e->getLine();
             $this->logger->error($error);
-
-            return ['error' => $error];
         }
     }
 
@@ -132,7 +128,7 @@ class airtablecore extends solution
      *
      * @return array
      */
-    public function get_modules($type = 'source')
+    public function get_modules($type = 'source'): array
     {
         if (!empty($this->modules[$this->projectID])) {
             return $this->modules[$this->projectID];
@@ -150,19 +146,17 @@ class airtablecore extends solution
      *
      * @return array
      */
-    public function get_module_fields($module, $type = 'source', $param = null)
+    public function get_module_fields($module, $type = 'source', $param = null): array
     {
         require 'lib/airtable/metadata.php';
-        parent::get_module_fields($module, $type);
+        $this->moduleFields = parent::get_module_fields($module, $type);
         try {
             if (!empty($moduleFields[$this->projectID][$module])) {
-                $this->moduleFields = $moduleFields[$this->projectID][$module];
+                $this->moduleFields = array_merge($this->moduleFields, $moduleFields[$this->projectID][$module]);
             }
-
             return $this->moduleFields;
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $this->logger->error($e->getMessage().' '.$e->getFile().' '.$e->getLine());
-
             return false;
         }
     }
@@ -173,8 +167,13 @@ class airtablecore extends solution
      * @param array $param
      *
      * @return array
+     * @throws ClientExceptionInterface
+     * @throws DecodingExceptionInterface
+     * @throws RedirectionExceptionInterface
+     * @throws ServerExceptionInterface
+     * @throws TransportExceptionInterface
      */
-    public function readData($param)
+    public function readData($param): array
     {
         try {
             $baseID = $this->paramConnexion['projectid'];
@@ -188,20 +187,16 @@ class airtablecore extends solution
             $param['fields'] = $this->cleanMyddlewareElementId($param['fields']);
             // Add required fields
             $param['fields'] = $this->addRequiredField($param['fields'], $param['module']);
-            // There is a bug on the parameter returnFieldsByFieldId soit can't be used
-            // In case we use fieldsId, we need to get the label to compare with Airtable result (only field label are returned)
-            foreach ($param['fields'] as $field) {
-                if ('fld' == substr($field, 0, 3)) {
-                    include_once 'lib/airtable/metadata.php';
-                    if (!empty($moduleFields[$baseID][$param['module']][$field]['label'])) {
-                        $fields[$field] = $moduleFields[$baseID][$param['module']][$field]['label'];
-                        continue;
-                    }
-                }
-                $fields[$field] = $field;
-            }
-            // Get the reference date field name
-            $dateRefField = $this->getDateRefName($param['module'], $param['ruleParams']['mode']);
+
+            // Get the reference date field name only when we read using reference date
+			if (empty($param['query'])) {
+				$dateRefField = $this->getDateRefName($param['module'], $param['ruleParams']['mode']);
+				// Add the dateRefField in teh field list
+				if (array_search($dateRefField, $param['fields']) === false) {
+					$param['fields'][] = $dateRefField;
+				}
+			}
+			
             $stop = false;
             $page = 1;
             $offset = '';
@@ -213,7 +208,7 @@ class airtablecore extends solution
                 if (!empty($param['query'])) {
                     if (!empty($param['query']['id'])) {
                         $id = $param['query']['id'];
-                        $response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module'].'/'.$id, $options);
+                        $response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module'].'/'.$id.'?returnFieldsByFieldId=true', $options);
                         $statusCode = $response->getStatusCode();
                         $contentType = $response->getHeaders()['content-type'][0];
                         $content2 = $response->getContent();
@@ -221,23 +216,48 @@ class airtablecore extends solution
                         // Add a dimension to fit with the rest of the method
                         $content['records'][] = $content2;
                     } else {
+						// There is a bug on the parameter returnFieldsByFieldId soit can't be used
+						// In case we use fieldsId, we need to set the label instead of the id of the field
+						foreach ($param['query'] as $key => $value) {
+							if ('fld' == substr($key, 0, 3)) {
+								if (!empty($moduleFields[$baseID][$param['module']][$key]['label'])) {
+									unset($param['query'][$key]);
+									$param['query'][$moduleFields[$baseID][$param['module']][$key]['label']] = $value;
+									continue;
+								}
+							}
+						}
+						$filterByFormula = 'filterByFormula=';
                         // Filter by specific field (for example to avoid duplicate records)
                         foreach ($param['query'] as $key => $queryParam) {
+							// If there are several filter we manage the AND operator
+							if(count($param['query']) > 1) {
+								if ($filterByFormula == 'filterByFormula=') {
+									$filterByFormula .= 'AND(';
+								} else {
+									$filterByFormula .= ',';
+								}
+							}
                             // Transform "___" into space (Myddleware can't have space in the field name)
                             $key = str_replace('___', ' ', $key);
-                            // TODO: improve this, for now we can only filter with ONE key,
-                            // we should be able to add a variety (but this would need probably a series of 'AND() / OR() query params)
-                            $response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module'].'?filterByFormula={'.$key.'}="'.$queryParam.'"', $options);
-                            $statusCode = $response->getStatusCode();
-                            $contentType = $response->getHeaders()['content-type'][0];
-                            $content = $response->getContent();
-                            $content = $response->toArray();
+							$filterByFormula .= '{'.$key.'}="'.$queryParam.'"';
                         }
+						// If there are several filter we manage the AND operator
+						if(count($param['query']) > 1) {
+							$filterByFormula = rtrim($filterByFormula, ',');
+							$filterByFormula .= ')';
+						}
+						// Get all records corresponding to the filters
+						$response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module'].'?returnFieldsByFieldId=true&'.$filterByFormula, $options);
+						$statusCode = $response->getStatusCode();
+						$contentType = $response->getHeaders()['content-type'][0];
+						$content = $response->getContent();
+						$content = $response->toArray();
                     }
                 } else {
                     // all records
                     $dateRef = $this->dateTimeFromMyddleware($param['date_ref']);
-                    $response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module']."?sort[0][field]=Last Modified&filterByFormula=IS_AFTER({Last Modified},'$dateRef')&pageSize=".$this->defaultLimit.'&maxRecords='.$param['limit'].$offset, $options);
+                    $response = $client->request('GET', $this->airtableURL.$baseID.'/'.$param['module']."?sort[0][field]=Last Modified&filterByFormula=IS_AFTER({Last Modified},'$dateRef')&returnFieldsByFieldId=true&pageSize=".$this->defaultLimit.'&maxRecords='.$param['limit'].$offset, $options);
                     $statusCode = $response->getStatusCode();
                     $contentType = $response->getHeaders()['content-type'][0];
                     $content = $response->getContent();
@@ -245,29 +265,31 @@ class airtablecore extends solution
                 }
 
                 // Get the offset id
-                $offset = (!empty($content['offset']) ? $content['offset'] : '');
+                $offset = (!empty($content['offset']) ? '&offset='.$content['offset'] : '');
                 if (!empty($content['records'])) {
                     $currentCount = 0;
                     //used for complex fields that contain arrays
                     $content = $this->convertResponse($param, $content['records']);
                     foreach ($content as $record) {
                         ++$currentCount;
-                        foreach ($fields as $key => $field) {
-                            $fieldWithSpace = str_replace('___', ' ', $field);
-                            if (isset($record['fields'][$fieldWithSpace])) {
-                                // Depending on the field type, the result can be an array, in this case we take the first result
-                                if (is_array($record['fields'][$fieldWithSpace])) {
-                                    $result['values'][$record['id']][$key] = current($record['fields'][$fieldWithSpace]);
-                                } else {
-                                    $result['values'][$record['id']][$key] = $record['fields'][$fieldWithSpace];
-                                }
-                            } else {
-                                $result['values'][$record['id']][$key] = '';
+						foreach ($param['fields'] as $field) {
+							if (!empty($record['fields'][$field])) {
+								// If teh value is an array (relation), we take the first entry
+								if (is_array($record['fields'][$field])) {
+									$result['values'][$record['id']][$field] = $record['fields'][$field][0];
+								} else {
+									$result['values'][$record['id']][$field] = $record['fields'][$field];
+								}
+							} else {
+                                $result['values'][$record['id']][$field] = '';
                             }
-                        }
+						}
 
                         // Get the reference date
-                        if (!empty($record['fields'][$dateRefField])) {
+                        if (
+								!empty($dateRefField)
+							AND	!empty($record['fields'][$dateRefField])
+						) {
                             $dateModified = $record['fields'][$dateRefField];
                         // createdTime not allowed for reading action, only to get an history or a duplicate field
                         } elseif (
@@ -276,7 +298,7 @@ class airtablecore extends solution
                         ) {
                             $dateModified = $record['createdTime'];
                         } else {
-                            throw new \Exception('No reference found. Please enable <Last Modified> field in your table '.$param['module'].'. ');
+                            throw new Exception('No reference found. Please enable <Last Modified> field in your table '.$param['module'].'. ');
                         }
                         $result['values'][$record['id']]['date_modified'] = $this->dateTimeToMyddleware($dateModified);
                         $result['values'][$record['id']]['id'] = $record['id'];
@@ -299,40 +321,31 @@ class airtablecore extends solution
                 and $result['count'] < $param['limit'] // count < rule limit
                 and !empty($offset) // Only if there is more data to be read
             );
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             $result['error'] = 'Error : '.$e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
             $this->logger->error($e->getMessage().' '.$e->getFile().' '.$e->getLine());
         }
-
         return $result;
     }
 
     /**
      * Create data into target app.
-     *
-     * @param array $param
-     *
-     * @return void
      */
-    public function createData($param)
+    public function createData($param): array
     {
         return $this->upsert('create', $param);
     }
 
     /**
      * Update existing data into target app.
-     *
-     * @param [type] $param
-     *
-     * @return void
      */
-    public function updateData($param)
+    public function updateData($param): array
     {
         return $this->upsert('update', $param);
     }
 
     // Delete a record
-    public function deleteData($param)
+    public function deleteData($param): array
     {
         return $this->upsert('delete', $param);
     }
@@ -341,11 +354,17 @@ class airtablecore extends solution
      * Insert or update data depending on method's value.
      *
      * @param string $method create|update
-     * @param array  $param
+     * @param array $param
      *
-     * @return void
+     * @return array
+     * @throws ClientExceptionInterface
+     * @throws DecodingExceptionInterface
+     * @throws RedirectionExceptionInterface
+     * @throws ServerExceptionInterface
+     * @throws TransportExceptionInterface
+     * @throws \Doctrine\DBAL\Exception
      */
-    public function upsert($method, $param)
+    public function upsert(string $method, array $param): array
     {
         // Init parameters
         $baseID = $this->paramConnexion['projectid'];
@@ -375,7 +394,7 @@ class airtablecore extends solution
                         // trigger to add custom code if needed
                         $data = $this->checkDataBeforeCreate($param, $data, $idDoc);
                     } elseif ('update' === $method) {
-                        $data = $this->checkDataBeforeUpdate($param, $data);
+                        $data = $this->checkDataBeforeUpdate($param, $data, $idDoc);
                     }
                     // Recard are stored in the URL for a deletionj
                     elseif ('delete' === $method) {
@@ -383,10 +402,6 @@ class airtablecore extends solution
                         $urlParamDelete .= (!empty($urlParamDelete) ? '&' : '').'records[]='.$data['target_id'];
                         ++$i;
                         continue;
-                    }
-                    // Myddleware_element_id is a field only used by Myddleware. Not sent to the target application
-                    if (!empty($data['Myddleware_element_id'])) {
-                        unset($data['Myddleware_element_id']);
                     }
 
                     $body['records'][$i]['fields'] = $data;
@@ -413,7 +428,9 @@ class airtablecore extends solution
                     // Add the record id in the body if update
                     if ('update' == $method) {
                         $body['records'][$i]['id'] = $data['target_id'];
-                        unset($body['records'][$i]['fields']['target_id']);
+                        if (isset($body['records'][$i]['fields']['target_id'])) {
+                            unset($body['records'][$i]['fields']['target_id']);
+                        }
                     }
                     ++$i;
                 }
@@ -474,9 +491,9 @@ class airtablecore extends solution
                         $this->updateDocumentStatus($idDoc, $result[$idDoc], $param);
                     }
                 } else {
-                    throw new \Exception('Failed to send the record but no error returned by Airtable. ');
+                    throw new Exception('Failed to send the record but no error returned by Airtable. ');
                 }
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 $error = $e->getMessage();
                 foreach ($records as $idDoc => $data) {
                     $result[$idDoc] = [
@@ -497,25 +514,44 @@ class airtablecore extends solution
         return $response;
     }
 
-    // retrun the reference date field name
-    public function getDateRefName($moduleSource, $ruleMode)
+    public function getDateRefName($moduleSource, $ruleMode): string
     {
-        return 'Last Modified';
+		// Search the field id
+		include 'lib/airtable/metadata.php';
+		$found_key = array_search('Last Modified', array_column($moduleFields[$this->paramConnexion['projectid']][$moduleSource], 'label'), true);
+		// Error if not found
+		if ($found_key === false) {
+			throw new Exception('Failed to found the date reference field name in the metadata');
+		}
+		
+		// Get the field id 
+		$fieldId = key(array_slice($moduleFields[$this->paramConnexion['projectid']][$moduleSource], $found_key, $found_key));
+		if (empty($fieldId)) {
+			throw new Exception('Failed to found the id corresponding to the date reference field.');
+		}
+
+        return $fieldId;
     }
 
-    // Convert date to Myddleware format
-    // 2020-07-08T12:33:06 to 2020-07-08 12:33:06
+    /**
+     * Convert date to Myddleware format
+     * 2020-07-08T12:33:06 to 2020-07-08 12:33:06
+     * @throws Exception
+     */
     protected function dateTimeToMyddleware($dateTime)
     {
-        $dto = new \DateTime($dateTime);
+        $dto = new DateTime($dateTime);
 
         return $dto->format('Y-m-d H:i:s');  //TODO: FIND THE EXACT FORMAT : 2015-08-29T07:00:00.000Z
     }
 
-    //convert from Myddleware format to Airtable format
+    /**
+     * convert from Myddleware format to Airtable format
+     * @throws Exception
+     */
     protected function dateTimeFromMyddleware($dateTime)
     {
-        $dto = new \DateTime($dateTime);
+        $dto = new DateTime($dateTime);
 
         return $dto->format('Y-m-d\TH:i:s');
     }

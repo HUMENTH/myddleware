@@ -1,4 +1,5 @@
 <?php
+
 /*********************************************************************************
  * This file is part of Myddleware.
 
@@ -21,7 +22,7 @@
 
  You should have received a copy of the GNU General Public License
  along with Myddleware.  If not, see <http://www.gnu.org/licenses/>.
-*********************************************************************************/
+ *********************************************************************************/
 
 namespace App\Manager;
 
@@ -32,6 +33,7 @@ use App\Solutions\eventbrite;
 use App\Solutions\facebook;
 use App\Solutions\file;
 use App\Solutions\hubspot;
+use App\Solutions\internallist;
 use App\Solutions\magento;
 use App\Solutions\mailchimp;
 use App\Solutions\mautic;
@@ -53,6 +55,7 @@ use App\Solutions\vtigercrm;
 use App\Solutions\woocommerce;
 use App\Solutions\wooeventmanager;
 use App\Solutions\wordpress;
+use App\Solutions\yousign;
 use App\Solutions\zuora;
 use Exception;
 
@@ -61,7 +64,7 @@ use Exception;
  */
 class SolutionManager
 {
-    private $classes = [];
+    private array $classes = [];
 
     public function __construct(
         wordpress $wordpress,
@@ -92,7 +95,9 @@ class SolutionManager
         sugarcrm $sugarcrm,
         salesforce $salesforce,
         airtable $airtable,
-        sendinblue $sendinblue
+        sendinblue $sendinblue,
+        internallist $internallist,
+        yousign $yousign
     ) {
         $this->classes = [
             'wordpress' => $wordpress,
@@ -124,13 +129,15 @@ class SolutionManager
             'salesforce' => $salesforce,
             'airtable' => $airtable,
             'sendinblue' => $sendinblue,
+            'yousign' => $yousign,
+            'internallist' => $internallist,
         ];
     }
 
     public function get(string $name)
     {
         if (!isset($this->classes[$name])) {
-            throw new Exception('Solution '.$name.' not found. Please make sure that you have added this solution into Myddleware. ');
+            throw new Exception('Solution ' . $name . ' not found. Please make sure that you have added this solution into Myddleware. ');
         }
 
         return $this->classes[$name];

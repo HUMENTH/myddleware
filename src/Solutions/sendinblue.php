@@ -36,17 +36,17 @@ use Symfony\Component\Form\Extension\Core\Type\TextType;
 class sendinbluecore extends solution
 {
     protected $config;
-    protected $baseUrl = 'https://app.sendinblue.com/';
-    protected $required_fields = [
+    protected string $baseUrl = 'https://app.sendinblue.com/';
+    protected array $required_fields = [
                                     'default' => ['id', 'modifiedAt'],
                                     'transactionalEmails' => ['uuid', 'date'],
                                     'transactionalEmailActivity' => ['messageId', 'event', 'date'],
                                 ];
-    protected $FieldsDuplicate = ['contacts' => ['email', 'SMS']];
-    protected $limitEmailActivity = 100;
-    protected $sendDeletion = true;
+    protected array $FieldsDuplicate = ['contacts' => ['email', 'SMS']];
+    protected int $limitEmailActivity = 100;
+    protected bool $sendDeletion = true;
 
-    public function getFieldsLogin()
+    public function getFieldsLogin(): array
     {
         return [
             [
@@ -87,7 +87,7 @@ class sendinbluecore extends solution
     }
 
     //Get module list
-    public function get_modules($type = 'source')
+    public function get_modules($type = 'source'): array
     {
         if ('source' == $type) {
             return [
@@ -103,7 +103,7 @@ class sendinbluecore extends solution
     }
 
     //Returns the fields of the module passed in parameter
-    public function get_module_fields($module, $type = 'source', $param = null)
+    public function get_module_fields($module, $type = 'source', $param = null): array
     {
         parent::get_module_fields($module, $type);
 
@@ -148,16 +148,36 @@ class sendinbluecore extends solution
                 'required_relationship' => false,
                 'relate' => false,
             ];
+			$this->moduleFields['emailBlacklisted'] = [
+                'label' => 'Email blacklisted',
+                'required' => false,
+                'type' => 'bool',
+                'type_bdd' => 'bool',
+                'required_relationship' => false,
+                'relate' => false,
+            ];
+			$this->moduleFields['smsBlacklisted'] = [
+                'label' => 'SMS blacklisted',
+                'required' => false,
+                'type' => 'bool',
+                'type_bdd' => 'bool',
+                'required_relationship' => false,
+                'relate' => false,
+            ];
 
             return $this->moduleFields;
         } catch (\Exception $e) {
-            $error = $e->getMessage();
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
 
-            return false;
+            return ['error' => $error];
         }
     }
 
-    // Read all fields
+    /**
+     * @throws \SendinBlue\Client\ApiException
+     * @throws \Exception
+     */
     public function read($param)
     {
         $result = [];
@@ -407,7 +427,7 @@ class sendinbluecore extends solution
         return $result;
     }
 
-    protected function getDateEnd($dateObj)
+    protected function getDateEnd($dateObj): string
     {
         $dateEndObj = clone $dateObj;
         $dateEndObj->add(new \DateInterval('P30D'));
@@ -421,7 +441,7 @@ class sendinbluecore extends solution
     }
 
     //fonction for get all your transactional email activity
-    public function EmailTransactional($param)
+    public function EmailTransactional($param): \SendinBlue\Client\Model\GetEmailEventReport
     {
         $apiInstance = new \SendinBlue\Client\Api\TransactionalEmailsApi(new \GuzzleHttp\Client(), $this->config);
         $limit = 50;
@@ -442,20 +462,38 @@ class sendinbluecore extends solution
     }
 
     // Create the record
-    protected function create($param, $record, $idDoc = null)
-    {
-        // Import or create new contact for sendinblue
-        $apiInstance = new \SendinBlue\Client\Api\ContactsApi(new \GuzzleHttp\Client(), $this->config);
-        $createContact = new \SendinBlue\Client\Model\CreateContact(); // Values to create a contact
-        $createContact['email'] = $record['email'];
-        // Add attributes
-        $createContact['attributes'] = $record;
-        $result = $apiInstance->createContact($createContact);
 
-        return $result->getId();
+    /**
+     * @throws \SendinBlue\Client\ApiException
+     */
+    protected function create($param, $record, $idDoc = null): ?int
+    {    
+		try {
+			// Import or create new contact for sendinblue
+			$apiInstance = new \SendinBlue\Client\Api\ContactsApi(new \GuzzleHttp\Client(), $this->config);
+			$createContact = new \SendinBlue\Client\Model\CreateContact(); // Values to create a contact
+			$createContact['email'] = $record['email'];
+			// Add attributes
+			$createContact['attributes'] = $record;
+			// Change the position of the data emailBlacklisted and smsBlacklisted
+			if (isset($updateContact['attributes']['emailBlacklisted'])) {
+				$updateContact['emailBlacklisted'] = $updateContact['attributes']['emailBlacklisted'];
+			}
+			if (isset($updateContact['attributes']['smsBlacklisted'])) {
+				$updateContact['smsBlacklisted'] = $updateContact['attributes']['smsBlacklisted'];
+			}	
+			$result = $apiInstance->createContact($createContact);
+		} catch (\Exception $e) {
+            throw new \Exception('Exception when calling ContactsApi->createContact: '.$e->getMessage());
+        }
+		return $result->getId();
     }
 
     // Update the record
+
+    /**
+     * @throws \Exception
+     */
     protected function update($param, $record, $idDoc = null)
     {
         try {
@@ -464,6 +502,13 @@ class sendinbluecore extends solution
             // target_id contains the id of the record to be modified
             $identifier = $record['target_id'];
             $updateContact['attributes'] = $record;
+			// Change the position of the data emailBlacklisted and smsBlacklisted
+			if (isset($updateContact['attributes']['emailBlacklisted'])) {
+				$updateContact['emailBlacklisted'] = $updateContact['attributes']['emailBlacklisted'];
+			}
+			if (isset($updateContact['attributes']['smsBlacklisted'])) {
+				$updateContact['smsBlacklisted'] = $updateContact['attributes']['smsBlacklisted'];
+			}			
             $result = $apiInstance->updateContact($identifier, $updateContact);
         } catch (\Exception $e) {
             throw new \Exception('Exception when calling ContactsApi->updateContact: '.$e->getMessage());
@@ -481,9 +526,9 @@ class sendinbluecore extends solution
     }
 
     // Check data before create
-    protected function checkDataBeforeUpdate($param, $data)
+    protected function checkDataBeforeUpdate($param, $data, $idDoc)
     {
-        $data = parent::checkDataBeforeUpdate($param, $data);
+        $data = parent::checkDataBeforeUpdate($param, $data, $idDoc);
 
         return $this->setBooleanValues($data);
     }
@@ -521,6 +566,9 @@ class sendinbluecore extends solution
 
     // Convert date to Myddleware format
     // 2020-07-08T12:33:06 to 2020-07-08 10:33:06
+    /**
+     * @throws \Exception
+     */
     protected function dateTimeToMyddleware($dateTime)
     {
         $dto = new \DateTime($dateTime);
@@ -529,6 +577,10 @@ class sendinbluecore extends solution
     }
 
     //convert from Myddleware format to Sendinble format
+
+    /**
+     * @throws \Exception
+     */
     protected function dateTimeFromMyddleware($dateTime)
     {
         $dto = new \DateTime($dateTime);
@@ -536,14 +588,17 @@ class sendinbluecore extends solution
         return $dto->format('Y-m-d\TH:i:s.uP');
     }
 
-    protected function dateTimeToDate($dateTime)
+    /**
+     * @throws \Exception
+     */
+    protected function dateTimeToDate($dateTime): string
     {
         $dto = new \DateTime($dateTime);
 
         return $dto->format('Y-m-d');
     }
 
-    public function getFieldsParamUpd($type, $module)
+    public function getFieldsParamUpd($type, $module): array
     {
         $params = parent::getFieldsParamUpd($type, $module);
         try {
@@ -603,14 +658,17 @@ class sendinbluecore extends solution
                 }
             } */
         } catch (\Exception $e) {
-            return [];
+            $error = $e->getMessage().' '.$e->getFile().' Line : ( '.$e->getLine().' )';
+            $this->logger->error($error);
+
+            return ['error' => $error];
         }
 
         return $params;
     }
 
     // Return a specific id for some modules
-    public function getIdName($module)
+    public function getIdName($module): string
     {
         if ('transactionalEmails' == $module) {
             return 'uuid';
@@ -620,9 +678,9 @@ class sendinbluecore extends solution
     }
 
     // Returns the name of the reference date field according to the module and mode of the rule
-    public function getRefFieldName($moduleSource, $RuleMode)
+    public function getRefFieldName($param): string
     {
-        switch ($moduleSource) {
+        switch ($param['module']) {
             case 'transactionalEmails':
                 return 'date';
                 break;
@@ -636,7 +694,7 @@ class sendinbluecore extends solution
     }
 
     // Build the direct link to the record (used in data transfer view)
-    public function getDirectLink($rule, $document, $type)
+    public function getDirectLink($rule, $document, $type): ?string
     {
         // Get url, module and record ID depending on the type
         if ('source' == $type) {
